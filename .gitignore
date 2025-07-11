@@ -1,0 +1,13 @@
+node_modules/
+.env
+.DS_Store
+*.log
+uploads/
+sessions/
+.wrangler/
+dist/
+*.json
+!package.json
+!package-lock.json
+!tsconfig.json
+!vercel.json

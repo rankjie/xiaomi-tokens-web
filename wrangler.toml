@@ -1,0 +1,6 @@
+name = "xiaomi-token-web"
+main = "src/index.ts"
+compatibility_date = "2023-12-18"
+
+[env.production]
+name = "xiaomi-token-web-production"
