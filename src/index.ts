@@ -226,24 +226,44 @@ app.post('/api/devices-stream', async (c) => {
         
         await writer.write(encoder.encode(`data: ${JSON.stringify({ type: 'status', message: 'Session validated. Fetching devices...' })}\n\n`));
         
+        let writerClosed = false;
+        
         // Set up progress callback
         client.onProgress = async (progress: any) => {
-          await writer.write(encoder.encode(`data: ${JSON.stringify({ type: 'progress', ...progress })}\n\n`));
+          if (!writerClosed) {
+            try {
+              await writer.write(encoder.encode(`data: ${JSON.stringify({ type: 'progress', ...progress })}\n\n`));
+            } catch (e) {
+              console.error('Failed to write progress:', e);
+              writerClosed = true;
+            }
+          }
         };
         
         // Get devices
         const result = await client.getDevices(server);
         
-        if (result.success) {
-          await writer.write(encoder.encode(`data: ${JSON.stringify({ type: 'complete', devices: result.devices })}\n\n`));
-        } else {
-          await writer.write(encoder.encode(`data: ${JSON.stringify({ type: 'error', message: result.error })}\n\n`));
+        if (!writerClosed) {
+          if (result.success) {
+            await writer.write(encoder.encode(`data: ${JSON.stringify({ type: 'complete', devices: result.devices })}\n\n`));
+          } else {
+            await writer.write(encoder.encode(`data: ${JSON.stringify({ type: 'error', message: result.error })}\n\n`));
+          }
         }
         
       } catch (error: any) {
-        await writer.write(encoder.encode(`data: ${JSON.stringify({ type: 'error', message: error.message })}\n\n`));
+        console.error('Stream processing error:', error);
+        try {
+          await writer.write(encoder.encode(`data: ${JSON.stringify({ type: 'error', message: error.message })}\n\n`));
+        } catch (e) {
+          console.error('Failed to write error:', e);
+        }
       } finally {
-        await writer.close();
+        try {
+          await writer.close();
+        } catch (e) {
+          console.error('Failed to close writer:', e);
+        }
       }
     })();
     

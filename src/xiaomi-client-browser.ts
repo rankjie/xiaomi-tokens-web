@@ -768,19 +768,34 @@ export class XiaomiCloudConnectorBrowser {
   }
 
   private decryptRC4(password: string, payload: string): string {
-    // Python: r.encrypt(bytes(1024)) then r.encrypt(base64.b64decode(payload))
-    const keyBytes = Uint8Array.from(atob(password), (c) => c.charCodeAt(0));
-    const rc4 = new RC4(keyBytes);
+    try {
+      // Python: r.encrypt(bytes(1024)) then r.encrypt(base64.b64decode(payload))
+      const keyBytes = Uint8Array.from(atob(password), (c) => c.charCodeAt(0));
+      const rc4 = new RC4(keyBytes);
 
-    // Discard first 1024 bytes
-    rc4.encrypt(new Uint8Array(1024));
+      // Discard first 1024 bytes
+      rc4.encrypt(new Uint8Array(1024));
 
-    // Decrypt the base64 payload
-    const encryptedBytes = Uint8Array.from(atob(payload), (c) => c.charCodeAt(0));
-    const decrypted = rc4.decrypt(encryptedBytes);
+      // The payload might not be base64 encoded, try to decode it
+      let encryptedBytes: Uint8Array;
+      try {
+        // Try base64 decode first
+        encryptedBytes = Uint8Array.from(atob(payload), (c) => c.charCodeAt(0));
+      } catch (e) {
+        // If base64 decode fails, treat as raw bytes
+        encryptedBytes = new TextEncoder().encode(payload);
+      }
+      
+      const decrypted = rc4.decrypt(encryptedBytes);
 
-    // Convert to string
-    return new TextDecoder().decode(decrypted);
+      // Convert to string
+      return new TextDecoder().decode(decrypted);
+    } catch (error) {
+      console.error("Decryption error:", error);
+      console.error("Payload length:", payload.length);
+      console.error("Payload preview:", payload.substring(0, 100));
+      throw error;
+    }
   }
 
   private async generateEncSignature(
@@ -1048,11 +1063,22 @@ export class XiaomiCloudConnectorBrowser {
       const responseText = await response.text();
       // console.log('Encrypted response received, length:', responseText.length);
 
+      // Check if response is an error
+      if (!response.ok) {
+        console.error("API error response:", response.status, responseText);
+        throw new Error(`API request failed: ${response.status}`);
+      }
+
       // Decrypt response
       const decrypted = this.decryptRC4(signedNonce, responseText);
       // console.log('Decrypted response:', decrypted.substring(0, 200));
 
-      return JSON.parse(decrypted);
+      try {
+        return JSON.parse(decrypted);
+      } catch (e) {
+        console.error("Failed to parse decrypted response:", decrypted.substring(0, 200));
+        throw new Error("Invalid response format");
+      }
     } catch (error: any) {
       console.error("Encrypted API call failed:", error);
       throw error;
