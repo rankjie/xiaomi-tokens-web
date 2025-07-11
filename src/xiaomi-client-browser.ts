@@ -1175,10 +1175,7 @@ export class XiaomiCloudConnectorBrowser {
       // 2FA state
       verifyUrl: this.verifyUrl,
       identitySession: this.identitySession,
-      identityOptions: this.identityOptions,
-      
-      // Timestamp for expiration
-      stateTimestamp: Date.now()
+      identityOptions: this.identityOptions
     };
   }
 

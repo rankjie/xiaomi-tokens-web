@@ -59,11 +59,6 @@ app.get('/', (c) => {
   return c.html(getHtmlContent());
 });
 
-// Check if client state is expired (1 hour)
-function isClientStateExpired(timestamp: number): boolean {
-  const ONE_HOUR = 60 * 60 * 1000;
-  return Date.now() - timestamp > ONE_HOUR;
-}
 
 // Login endpoint
 app.post('/api/login', async (c) => {
@@ -115,11 +110,6 @@ app.post('/api/verify-2fa', async (c) => {
       ticket: string; 
       clientState: any;
     }>();
-    
-    // Check if client state is expired
-    if (clientState.stateTimestamp && isClientStateExpired(clientState.stateTimestamp)) {
-      return c.json<LoginResponse>({ success: false, error: 'Session expired. Please login again.' });
-    }
     
     // Recreate client from state
     const client = XiaomiCloudConnectorBrowser.fromClientState(clientState);
@@ -1245,18 +1235,9 @@ function getHtmlContent(): string {
             const code = document.getElementById('verifyCode').value;
             
             if (!tempClientState) {
-                showAlert('Session expired. Please login again.', 'error');
+                showAlert('Session not found. Please login again.', 'error');
                 document.getElementById('verifySection').classList.add('hidden');
                 document.getElementById('loginForm').classList.remove('hidden');
-                return;
-            }
-            
-            // Check if client state is expired
-            if (tempClientState.stateTimestamp && Date.now() - tempClientState.stateTimestamp > 60 * 60 * 1000) {
-                showAlert('Session expired (1 hour timeout). Please login again.', 'error');
-                document.getElementById('verifySection').classList.add('hidden');
-                document.getElementById('loginForm').classList.remove('hidden');
-                tempClientState = null;
                 return;
             }
             
