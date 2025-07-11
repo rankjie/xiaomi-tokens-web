@@ -2,6 +2,12 @@
 
 Web version of Xiaomi Cloud Tokens Extractor built with TypeScript, Hono.js, and deployable to Cloudflare Workers, Vercel, and other edge platforms.
 
+## Quick Deploy
+
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Frankjie%2Fxiaomi-tokens-web&project-name=xiaomi-tokens-web&repository-name=xiaomi-tokens-web)
+
+[![Deploy to Cloudflare Workers](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/rankjie/xiaomi-tokens-web)
+
 ## Features
 
 - 🔐 Xiaomi account login with 2FA support
@@ -33,15 +39,29 @@ npm run dev
 
 ## Deployment
 
+### Deploy to Vercel (Recommended)
+Click the deploy button above or run:
+```bash
+vercel
+```
+
 ### Deploy to Cloudflare Workers
+Click the deploy button above or run:
 ```bash
 npm run deploy
 ```
 
-### Deploy to Vercel
-```bash
-vercel
-```
+### Deploy to Cloudflare Pages
+1. Fork this repository
+2. Go to [Cloudflare Pages](https://pages.cloudflare.com/)
+3. Connect your GitHub account
+4. Click "Create a project"
+5. Select your forked repository
+6. Set the following build settings:
+   - Framework preset: `None`
+   - Build command: `npm install && npm run build`
+   - Build output directory: `/`
+   - Environment variables: None required
 
 ### Deploy to other platforms
 The app is built with Hono.js which supports multiple platforms. Check [Hono's documentation](https://hono.dev/) for platform-specific deployment guides.
