@@ -1053,9 +1053,12 @@ function getHtmlContent(): string {
                 </div>
                 
                 <div class="privacy-section" style="margin-top: 1.5rem; padding-top: 1.5rem; border-top: 1px solid var(--border-light);">
-                    <p style="font-size: 0.875rem; color: var(--text-secondary);">
+                    <p style="font-size: 0.875rem; color: var(--text-secondary); margin-bottom: 0.5rem;">
                         <strong>Disclaimer:</strong> This is an unofficial tool not affiliated with Xiaomi. Use at your own risk. 
                         The tool replicates the functionality of the Python-based Xiaomi-cloud-tokens-extractor project in a web interface.
+                    </p>
+                    <p style="font-size: 0.75rem; color: var(--text-secondary); text-align: center; margin: 0;">
+                        Version 1.0.0
                     </p>
                 </div>
             </div>
