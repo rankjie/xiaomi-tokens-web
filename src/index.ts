@@ -214,17 +214,28 @@ app.post('/api/devices-stream', async (c) => {
     (async () => {
       try {
         // Send initial status
-        await writer.write(encoder.encode(`data: ${JSON.stringify({ type: 'status', message: 'Validating session...' })}\n\n`));
+        await writer.write(encoder.encode(`data: ${JSON.stringify({ type: 'status', message: 'Fetching devices...' })}\n\n`));
         
-        // Validate session
-        const isValid = await client.validateSession();
-        if (!isValid) {
-          await writer.write(encoder.encode(`data: ${JSON.stringify({ type: 'error', message: 'Session expired' })}\n\n`));
-          await writer.close();
-          return;
+        // Skip validation for fresh login sessions - they should be valid
+        // Only validate for loaded sessions from file
+        const sessionData = (client as any).getSessionData();
+        if (sessionData.savedAt) {
+          // This is a loaded session, validate it
+          const savedTime = new Date(sessionData.savedAt).getTime();
+          const now = Date.now();
+          const hoursSinceSaved = (now - savedTime) / (1000 * 60 * 60);
+          
+          if (hoursSinceSaved > 1) {
+            // Only validate if session is older than 1 hour
+            await writer.write(encoder.encode(`data: ${JSON.stringify({ type: 'status', message: 'Validating session...' })}\n\n`));
+            const isValid = await client.validateSession();
+            if (!isValid) {
+              await writer.write(encoder.encode(`data: ${JSON.stringify({ type: 'error', message: 'Session expired' })}\n\n`));
+              await writer.close();
+              return;
+            }
+          }
         }
-        
-        await writer.write(encoder.encode(`data: ${JSON.stringify({ type: 'status', message: 'Session validated. Fetching devices...' })}\n\n`));
         
         let writerClosed = false;
         
