@@ -2,11 +2,15 @@
   "name": "xiaomi-token-web",
   "version": "1.0.0",
   "type": "module",
+  "engines": {
+    "node": ">=18"
+  },
   "scripts": {
     "dev": "wrangler dev src/index.ts",
     "deploy": "wrangler deploy --minify src/index.ts",
     "build": "tsc",
-    "serve": "tsx watch src/server.ts"
+    "serve": "tsx watch src/server.ts",
+    "vercel-build": "echo 'No build needed'"
   },
   "dependencies": {
     "hono": "^4.8.4",
