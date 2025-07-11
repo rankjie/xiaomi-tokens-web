@@ -333,6 +333,7 @@ export class XiaomiCloudConnectorBrowser {
     return {
       ok: result.status >= 200 && result.status < 300,
       status: result.status,
+      headers: result.headers,
       text: async () => result.body,
       json: async () => {
         let jsonStr = result.body;
@@ -673,14 +674,21 @@ export class XiaomiCloudConnectorBrowser {
     const cookieStrings = Array.isArray(cookieString) ? cookieString : [cookieString];
 
     cookieStrings.forEach((cookieStr) => {
-      // Parse each Set-Cookie header
-      const parts = cookieStr.split(";");
-      const [keyValue] = parts;
-      const [key, value] = keyValue.trim().split("=");
+      // Handle comma-separated cookies from proxy
+      const individualCookies = cookieStr.split(/,(?=\s*\w+=)/);
+      
+      individualCookies.forEach((cookie) => {
+        // Parse each Set-Cookie header
+        const parts = cookie.trim().split(";");
+        const [keyValue] = parts;
+        if (!keyValue) return;
+        
+        const [key, value] = keyValue.trim().split("=");
 
-      if (key && value) {
-        this.cookies[key] = value;
-      }
+        if (key && value) {
+          this.cookies[key] = value;
+        }
+      });
     });
   }
 

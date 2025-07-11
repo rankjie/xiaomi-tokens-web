@@ -20,7 +20,8 @@ app.post('/api/proxy', async (c) => {
         ...headers,
         // Remove host header to avoid conflicts
         'host': undefined
-      }
+      },
+      redirect: 'manual' // Handle redirects manually to preserve cookies
     };
     
     // Handle body based on content type
@@ -32,23 +33,58 @@ app.post('/api/proxy', async (c) => {
       }
     }
     
-    const response = await fetch(url, fetchOptions);
+    // Collect all cookies from redirect chain
+    const allCookies: string[] = [];
+    let currentUrl = url;
+    let redirectCount = 0;
+    const maxRedirects = 10;
     
-    const responseText = await response.text();
-    const responseHeaders: Record<string, string> = {};
-    
-    // Copy relevant headers
-    response.headers.forEach((value, key) => {
-      if (key.toLowerCase() === 'set-cookie') {
-        responseHeaders[key] = value;
+    while (redirectCount < maxRedirects) {
+      const response = await fetch(currentUrl, fetchOptions);
+      
+      // Collect cookies from this response
+      const setCookieHeaders = response.headers.getAll ? 
+        response.headers.getAll('set-cookie') : 
+        [response.headers.get('set-cookie')].filter(Boolean);
+      
+      setCookieHeaders.forEach(cookie => {
+        if (cookie) allCookies.push(cookie);
+      });
+      
+      // Check if we need to follow a redirect
+      if (response.status >= 300 && response.status < 400) {
+        const location = response.headers.get('location');
+        if (location) {
+          // Handle relative redirects
+          currentUrl = new URL(location, currentUrl).toString();
+          redirectCount++;
+          continue;
+        }
       }
-    });
+      
+      // Final response
+      const responseText = await response.text();
+      const responseHeaders: Record<string, string> = {};
+      
+      // Include location header if present
+      const locationHeader = response.headers.get('location');
+      if (locationHeader) {
+        responseHeaders['location'] = locationHeader;
+      }
+      
+      // Include all collected cookies
+      if (allCookies.length > 0) {
+        responseHeaders['set-cookie'] = allCookies.join(', ');
+      }
+      
+      return c.json({
+        status: response.status,
+        headers: responseHeaders,
+        body: responseText
+      });
+    }
     
-    return c.json({
-      status: response.status,
-      headers: responseHeaders,
-      body: responseText
-    });
+    throw new Error('Too many redirects');
   } catch (error: any) {
     return c.json({ error: error.message }, 500);
   }
