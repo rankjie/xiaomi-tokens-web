@@ -4,8 +4,6 @@ Web version of Xiaomi Cloud Tokens Extractor built with TypeScript, Hono.js, and
 
 ## Quick Deploy
 
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Frankjie%2Fxiaomi-tokens-web&project-name=xiaomi-tokens-web&repository-name=xiaomi-tokens-web)
-
 [![Deploy to Cloudflare Workers](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/rankjie/xiaomi-tokens-web)
 
 ## Features
