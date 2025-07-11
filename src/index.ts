@@ -1010,12 +1010,12 @@ function getHtmlContent(): string {
         </div>
         
         
-        <div id="devicesSection" class="card hidden" style="position: relative;">
-            <div class="card-header">
-                <div class="card-icon">📱</div>
-                <h2>Devices</h2>
-            </div>
-            <div style="position: absolute; top: 1.5rem; right: 1.5rem;">
+        <div id="devicesSection" class="card hidden">
+            <div class="card-header" style="justify-content: space-between; align-items: center;">
+                <div style="display: flex; align-items: center;">
+                    <div class="card-icon">📱</div>
+                    <h2>Devices</h2>
+                </div>
                 <button id="refreshDevicesBtn" class="button-secondary" style="padding: 0.5rem 1rem; font-size: 0.875rem;" onclick="loadDevices()">
                     🔄 Refresh Devices
                 </button>
@@ -1377,8 +1377,8 @@ function getHtmlContent(): string {
                 // Create collapsed session view
                 const savedAt = currentSession.savedAt ? new Date(currentSession.savedAt).toLocaleString() : 'Unknown';
                 authCard.innerHTML = \`
-                    <div class="card-header" style="margin-bottom: 0;">
-                        <div style="display: flex; align-items: center; flex: 1;">
+                    <div class="card-header" style="margin-bottom: 0; justify-content: space-between; align-items: center;">
+                        <div style="display: flex; align-items: center;">
                             <div class="card-icon">🔐</div>
                             <div style="margin-left: 1rem;">
                                 <h2 style="margin-bottom: 0.25rem;">Authenticated Session</h2>
