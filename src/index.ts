@@ -59,18 +59,8 @@ app.get('/', (c) => {
   return c.html(getHtmlContent());
 });
 
-// Store active login sessions temporarily (in production, use Redis or similar)
-const activeSessions = new Map<string, { client: XiaomiCloudConnectorBrowser; timestamp: number }>();
-
-// Generate secure session key with timestamp
-function generateSecureSessionKey(): string {
-  const randomPart = crypto.randomUUID();
-  const timestamp = Date.now();
-  return `${randomPart}_${timestamp}`;
-}
-
-// Check if session is expired (1 hour)
-function isSessionExpired(timestamp: number): boolean {
+// Check if client state is expired (1 hour)
+function isClientStateExpired(timestamp: number): boolean {
   const ONE_HOUR = 60 * 60 * 1000;
   return Date.now() - timestamp > ONE_HOUR;
 }
@@ -80,7 +70,6 @@ app.post('/api/login', async (c) => {
   try {
     const { username, password, server = 'cn' } = await c.req.json<LoginCredentials>();
     
-    const sessionKey = generateSecureSessionKey();
     const client = new XiaomiCloudConnectorBrowser(username, password);
     
     // Step 1
@@ -93,20 +82,14 @@ app.post('/api/login', async (c) => {
     const step2Result = await client.loginStep2();
     if (!step2Result.success) {
       if (step2Result.requires2FA) {
-        // Extract timestamp from sessionKey
-        const timestamp = parseInt(sessionKey.split('_')[1]);
-        
-        // Store the client instance with timestamp for 2FA verification
-        activeSessions.set(sessionKey, { client, timestamp });
-        
-        // Clean up after 1 hour
-        setTimeout(() => activeSessions.delete(sessionKey), 60 * 60 * 1000);
+        // Return client state for browser to store
+        const clientState = client.getClientState();
         
         return c.json<LoginResponse>({
           success: false,
           requires2FA: true,
           verifyUrl: step2Result.verifyUrl,
-          sessionKey // Send back to client for 2FA
+          clientState // Send state to browser
         });
       }
       return c.json<LoginResponse>({ success: false, error: step2Result.error });
@@ -128,28 +111,18 @@ app.post('/api/login', async (c) => {
 // 2FA verification endpoint
 app.post('/api/verify-2fa', async (c) => {
   try {
-    const { ticket, sessionKey } = await c.req.json<{ 
+    const { ticket, clientState } = await c.req.json<{ 
       ticket: string; 
-      sessionKey: string;
+      clientState: any;
     }>();
     
-    // console.log("2FA verification endpoint - ticket:", ticket);
-    // console.log("2FA verification endpoint - sessionKey:", sessionKey);
-    
-    // Retrieve the stored client instance
-    const sessionData = activeSessions.get(sessionKey);
-    if (!sessionData) {
-      return c.json<LoginResponse>({ success: false, error: 'Session not found. Please login again.' });
-    }
-    
-    // Extract timestamp from sessionKey and check expiration
-    const sessionTimestamp = parseInt(sessionKey.split('_')[1]);
-    if (isSessionExpired(sessionTimestamp)) {
-      activeSessions.delete(sessionKey);
+    // Check if client state is expired
+    if (clientState.stateTimestamp && isClientStateExpired(clientState.stateTimestamp)) {
       return c.json<LoginResponse>({ success: false, error: 'Session expired. Please login again.' });
     }
     
-    const { client } = sessionData;
+    // Recreate client from state
+    const client = XiaomiCloudConnectorBrowser.fromClientState(clientState);
     
     // Check identity options and verify ticket
     const identityCheck = await (client as any).checkIdentityOptions();
@@ -185,9 +158,6 @@ app.post('/api/verify-2fa', async (c) => {
     if (!step3Success) {
       return c.json<LoginResponse>({ success: false, error: 'Login step 3 failed after 2FA' });
     }
-    
-    // Clean up the stored session
-    activeSessions.delete(sessionKey);
     
     const session = client.getSessionData();
     return c.json<LoginResponse>({ success: true, session });
@@ -1104,7 +1074,7 @@ function getHtmlContent(): string {
     
     <script>
         let currentSession = null;
-        let tempSessionKey = null;
+        let tempClientState = null; // Store client state for stateless 2FA
         let selectedServer = 'cn'; // Store selected server
         let sessionLoadedFromFile = false; // Track if session was loaded from file
         
@@ -1236,8 +1206,8 @@ function getHtmlContent(): string {
                     updateSessionUI();
                     await loadDevices();
                 } else if (result.requires2FA) {
-                    // Store the session key for 2FA verification
-                    tempSessionKey = result.sessionKey;
+                    // Store the client state for 2FA verification
+                    tempClientState = result.clientState;
                     
                     const verifyUrlElement = document.getElementById('verifyUrl');
                     verifyUrlElement.textContent = result.verifyUrl;
@@ -1274,10 +1244,19 @@ function getHtmlContent(): string {
             e.preventDefault();
             const code = document.getElementById('verifyCode').value;
             
-            if (!tempSessionKey) {
+            if (!tempClientState) {
                 showAlert('Session expired. Please login again.', 'error');
                 document.getElementById('verifySection').classList.add('hidden');
                 document.getElementById('loginForm').classList.remove('hidden');
+                return;
+            }
+            
+            // Check if client state is expired
+            if (tempClientState.stateTimestamp && Date.now() - tempClientState.stateTimestamp > 60 * 60 * 1000) {
+                showAlert('Session expired (1 hour timeout). Please login again.', 'error');
+                document.getElementById('verifySection').classList.add('hidden');
+                document.getElementById('loginForm').classList.remove('hidden');
+                tempClientState = null;
                 return;
             }
             
@@ -1287,7 +1266,7 @@ function getHtmlContent(): string {
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         ticket: code,
-                        sessionKey: tempSessionKey
+                        clientState: tempClientState
                     })
                 });
                 
@@ -1360,7 +1339,7 @@ function getHtmlContent(): string {
         // Logout function
         function logout() {
             currentSession = null;
-            tempSessionKey = null;
+            tempClientState = null;
             selectedServer = 'cn';
             sessionLoadedFromFile = false;
             location.reload();

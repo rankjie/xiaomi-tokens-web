@@ -35,7 +35,7 @@ export interface LoginResponse {
   verifyUrl?: string;
   error?: string;
   session?: SessionData;
-  sessionKey?: string;
+  clientState?: any; // Full client state for stateless operation
 }
 
 export interface DevicesResponse {

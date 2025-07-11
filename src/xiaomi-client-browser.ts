@@ -266,7 +266,7 @@ export class XiaomiCloudConnectorBrowser {
 
   private async proxyFetch(url: string, options: any = {}): Promise<any> {
     // When running on server (Node.js), make direct request
-    if (typeof window === "undefined") {
+    if (typeof globalThis.window === "undefined") {
       const response = await fetch(url, {
         method: options.method || "GET",
         headers: options.headers || {},
@@ -1148,6 +1148,65 @@ export class XiaomiCloudConnectorBrowser {
       this.cookies.serviceToken = this.serviceToken;
       this.cookies.yetAnotherServiceToken = this.serviceToken;
     }
+  }
+
+  // Get full client state for stateless operation
+  getClientState(): any {
+    return {
+      // Credentials
+      username: this.username,
+      password: this.password,
+      
+      // Device info
+      agent: this.agent,
+      deviceId: this.deviceId,
+      
+      // Session tokens
+      cookies: this.cookies,
+      sign: this.sign,
+      ssecurity: this.ssecurity,
+      userId: this.userId,
+      cUserId: this.cUserId,
+      passToken: this.passToken,
+      location: this.location,
+      code: this.code,
+      serviceToken: this.serviceToken,
+      
+      // 2FA state
+      verifyUrl: this.verifyUrl,
+      identitySession: this.identitySession,
+      identityOptions: this.identityOptions,
+      
+      // Timestamp for expiration
+      stateTimestamp: Date.now()
+    };
+  }
+
+  // Restore full client state from browser storage
+  static fromClientState(state: any): XiaomiCloudConnectorBrowser {
+    const client = new XiaomiCloudConnectorBrowser(state.username, state.password);
+    
+    // Restore device info
+    client.agent = state.agent;
+    client.deviceId = state.deviceId;
+    
+    // Restore session tokens
+    client.cookies = state.cookies || {};
+    client.sign = state.sign;
+    client.ssecurity = state.ssecurity;
+    client.userId = state.userId;
+    client.cUserId = state.cUserId;
+    client.passToken = state.passToken;
+    client.location = state.location;
+    client.code = state.code;
+    client.serviceToken = state.serviceToken;
+    
+    // Restore 2FA state
+    client.verifyUrl = state.verifyUrl;
+    client.identitySession = state.identitySession;
+    client.identityOptions = state.identityOptions || [];
+    
+    return client;
   }
 
   async validateSession(): Promise<boolean> {
