@@ -11,3 +11,4 @@ dist/
 !package-lock.json
 !tsconfig.json
 !vercel.json
+.vercel

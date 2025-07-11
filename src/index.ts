@@ -60,14 +60,27 @@ app.get('/', (c) => {
 });
 
 // Store active login sessions temporarily (in production, use Redis or similar)
-const activeSessions = new Map<string, XiaomiCloudConnectorBrowser>();
+const activeSessions = new Map<string, { client: XiaomiCloudConnectorBrowser; timestamp: number }>();
+
+// Generate secure session key with timestamp
+function generateSecureSessionKey(): string {
+  const randomPart = crypto.randomUUID();
+  const timestamp = Date.now();
+  return `${randomPart}_${timestamp}`;
+}
+
+// Check if session is expired (1 hour)
+function isSessionExpired(timestamp: number): boolean {
+  const ONE_HOUR = 60 * 60 * 1000;
+  return Date.now() - timestamp > ONE_HOUR;
+}
 
 // Login endpoint
 app.post('/api/login', async (c) => {
   try {
     const { username, password, server = 'cn' } = await c.req.json<LoginCredentials>();
     
-    const sessionKey = `${username}_${Date.now()}`;
+    const sessionKey = generateSecureSessionKey();
     const client = new XiaomiCloudConnectorBrowser(username, password);
     
     // Step 1
@@ -80,11 +93,14 @@ app.post('/api/login', async (c) => {
     const step2Result = await client.loginStep2();
     if (!step2Result.success) {
       if (step2Result.requires2FA) {
-        // Store the client instance for 2FA verification
-        activeSessions.set(sessionKey, client);
+        // Extract timestamp from sessionKey
+        const timestamp = parseInt(sessionKey.split('_')[1]);
         
-        // Clean up after 5 minutes
-        setTimeout(() => activeSessions.delete(sessionKey), 5 * 60 * 1000);
+        // Store the client instance with timestamp for 2FA verification
+        activeSessions.set(sessionKey, { client, timestamp });
+        
+        // Clean up after 1 hour
+        setTimeout(() => activeSessions.delete(sessionKey), 60 * 60 * 1000);
         
         return c.json<LoginResponse>({
           success: false,
@@ -121,10 +137,19 @@ app.post('/api/verify-2fa', async (c) => {
     // console.log("2FA verification endpoint - sessionKey:", sessionKey);
     
     // Retrieve the stored client instance
-    const client = activeSessions.get(sessionKey);
-    if (!client) {
+    const sessionData = activeSessions.get(sessionKey);
+    if (!sessionData) {
+      return c.json<LoginResponse>({ success: false, error: 'Session not found. Please login again.' });
+    }
+    
+    // Extract timestamp from sessionKey and check expiration
+    const sessionTimestamp = parseInt(sessionKey.split('_')[1]);
+    if (isSessionExpired(sessionTimestamp)) {
+      activeSessions.delete(sessionKey);
       return c.json<LoginResponse>({ success: false, error: 'Session expired. Please login again.' });
     }
+    
+    const { client } = sessionData;
     
     // Check identity options and verify ticket
     const identityCheck = await (client as any).checkIdentityOptions();
