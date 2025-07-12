@@ -1,5 +1,7 @@
 # Xiaomi Token Web
 
+[中文版](README_CN.md) | English
+
 A modern web interface for extracting device tokens from your Xiaomi account. Built with TypeScript, Hono.js, and deployable to Cloudflare Workers and other edge platforms.
 
 🚀 **Live Demo**: [https://xiaomi-token-web.asd.workers.dev/](https://xiaomi-token-web.asd.workers.dev/)
