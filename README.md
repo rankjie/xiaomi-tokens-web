@@ -1,19 +1,30 @@
 # Xiaomi Token Web
 
-Web version of Xiaomi Cloud Tokens Extractor built with TypeScript, Hono.js, and deployable to Cloudflare Workers, Vercel, and other edge platforms.
+A modern web interface for extracting device tokens from your Xiaomi account. Built with TypeScript, Hono.js, and deployable to Cloudflare Workers and other edge platforms.
 
-## Quick Deploy
-
-[![Deploy to Cloudflare Workers](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/rankjie/xiaomi-tokens-web)
+🚀 **Live Demo**: [https://xiaomi-token-web.asd.workers.dev/](https://xiaomi-token-web.asd.workers.dev/)
 
 ## Features
 
 - 🔐 Xiaomi account login with 2FA support
 - 💾 Session save/load functionality
-- 📱 Device information extraction
-- 🌐 Multi-region server support
-- ⚡ Edge-ready with Hono.js
-- 📝 TypeScript for type safety
+- 📱 Device information extraction with tokens
+- 🌐 Multi-region server support with auto-discovery
+- ⚡ Edge-ready deployment with Hono.js
+- 🔍 Automatic region scanning
+
+## Important Notice
+
+⚠️ **Privacy Warning**: The hosted version processes your credentials through a third-party server. For maximum privacy and security, it is **HIGHLY RECOMMENDED** to deploy your own instance.
+
+## Quick Start
+
+### Deploy Your Own (Recommended)
+
+[![Deploy to Cloudflare Workers](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/rankjie/xiaomi-tokens-web)
+
+### Use the Hosted Version (Use at Your Own Risk)
+Visit [https://xiaomi-token-web.asd.workers.dev/](https://xiaomi-token-web.asd.workers.dev/) - Not recommended for privacy-sensitive users.
 
 ## Development
 
@@ -33,18 +44,16 @@ npm run serve
 
 # Run with Wrangler (Cloudflare Workers emulation)
 npm run dev
+
+# Enable debug logging (sensitive data is automatically sanitized)
+DEBUG=true npm run serve
+# or
+DEBUG=1 npm run dev
 ```
 
-## Deployment
-
-### Deploy to Vercel (Recommended)
-Click the deploy button above or run:
-```bash
-vercel
-```
+## Deployment Options
 
 ### Deploy to Cloudflare Workers
-Click the deploy button above or run:
 ```bash
 npm run deploy
 ```
@@ -53,85 +62,102 @@ npm run deploy
 1. Fork this repository
 2. Go to [Cloudflare Pages](https://pages.cloudflare.com/)
 3. Connect your GitHub account
-4. Click "Create a project"
-5. Select your forked repository
-6. Set the following build settings:
+4. Create a new project and select your fork
+5. Use these build settings:
    - Framework preset: `None`
    - Build command: `npm install && npm run build`
    - Build output directory: `/`
-   - Environment variables: None required
 
 ### Deploy to other platforms
 The app is built with Hono.js which supports multiple platforms. Check [Hono's documentation](https://hono.dev/) for platform-specific deployment guides.
 
-## Usage
+## Usage Guide
 
-1. Open the web interface
-2. Enter your Xiaomi account credentials
-3. Select your server region
-4. If 2FA is required:
+1. **Login**
+   - Enter your Xiaomi account credentials (email, phone, or Xiaomi ID)
+   - Select your server region (or let auto-discovery find your devices)
+   - Click Login
+
+2. **Two-Factor Authentication (if enabled)**
    - Open the provided URL in a browser
-   - Get the verification code
-   - **DO NOT** complete verification on Xiaomi's website
-   - Enter the code in the web interface
-5. Save your session for future use
-6. View your devices and their tokens
+   - Request a verification code via SMS or email
+   - **Important**: DO NOT complete verification on Xiaomi's website
+   - Enter the 6-digit code in the web interface
 
-## Session Management
+3. **View Devices**
+   - After successful login, your devices will be displayed
+   - Click on any value to copy it to clipboard
+   - Switch regions using the dropdown if needed
 
-- **Save Session**: Download your session as a JSON file
-- **Load Session**: Upload a previously saved session file
-- **Validate Session**: Check if your session is still valid
+4. **Session Management**
+   - Save your session for future use (avoids repeated login)
+   - Load previously saved sessions
+   - Sessions are compatible with the Python version
 
-## Security Notes
+## Security & Privacy
 
-- Sessions are stored locally in your browser
-- No data is stored on the server
-- All API calls are made directly to Xiaomi's servers
-- Use at your own risk
+- ✅ **No server storage**: All data stays in your browser
+- ✅ **Direct API calls**: Communicates directly with Xiaomi servers
+- ✅ **Open source**: Fully auditable code
+- ✅ **Session encryption**: Uses Xiaomi's official encryption methods
+- ⚠️ **Use at your own risk**: This is an unofficial tool
 
-## Current Status
+## Technical Details
 
-### ✅ Working Features
-- Login with username/password
-- 2FA verification flow  
-- Session persistence (save/load)
-- Compatible with Python-saved sessions
-- **Device listing with RC4 encrypted API** (✅ NEW!)
-- Retrieves all owned and shared devices
-- Extracts device tokens, IPs, MACs, and other info
+### Authentication Flow
+- Three-step login process matching Xiaomi's official flow
+- 2FA support with SMS/email verification
+- Proper session cookie management
 
-### Technical Implementation
+### API Implementation
+- RC4 encryption/decryption for secure API calls
+- SHA1/SHA256-based signature generation
+- Support for all required Xiaomi IoT v2 endpoints
 
-1. **Authentication**: Matches Python implementation exactly
-   - Three-step login process
-   - 2FA support with identity verification
-   - Session cookie management
+### Supported Endpoints
+- `/v2/homeroom/gethome` - Retrieve user's homes
+- `/v2/home/home_device_list` - Get devices for each home
+- `/v2/user/get_device_cnt` - Validate session status
 
-2. **RC4 Encrypted API**: Full implementation of Python's encrypted API calls
-   - RC4 encryption/decryption for requests and responses
-   - SHA1-based signature generation for encrypted calls
-   - Supports all v2 API endpoints
+### Device Information Retrieved
+- Device name and model
+- Device ID (DID)
+- Token (for local control)
+- IP address and MAC address
+- BLE key (for Bluetooth devices)
+- Online/offline status
 
-3. **Signature Generation**:
-   - Nonce: 8 random bytes + 4 time bytes (big-endian)
-   - Signed nonce: SHA256(base64_decode(ssecurity) + base64_decode(nonce))
-   - Regular signature: HMAC-SHA256 with signed_nonce as key
-   - Encrypted signature: SHA1 hash of method|path|params|signed_nonce
+## Related Projects
 
-4. **API Endpoints**:
-   - `/v2/homeroom/gethome` - Get user's homes
-   - `/v2/home/home_device_list` - Get devices for a home
-   - `/v2/user/get_device_cnt` - Validate session and get device counts
-
-5. **Required Headers & Cookies**:
-   - `MIOT-ENCRYPT-ALGORITHM: ENCRYPT-RC4`
-   - `x-xiaomi-protocal-flag-cli: PROTOCAL-HTTP2`
-   - userId, serviceToken, yetAnotherServiceToken
-   - locale, timezone, is_daylight, dst_offset, channel
-   - sdkVersion: accountsdk-18.8.15
-   - deviceId
+- [Original Python Version](https://github.com/PiotrMachowski/Xiaomi-cloud-tokens-extractor) by PiotrMachowski
+- [Home Assistant Xiaomi Integration](https://github.com/al-one/hass-xiaomi-miot)
 
 ## License
 
-MIT
+This project is licensed under the GNU General Public License v3.0 (GPL-3.0).
+
+### Important License Requirements:
+- ❌ **No commercial use** - This project cannot be used for commercial purposes
+- 📖 **Open source required** - Any derivative work must also be open-sourced under GPL-3.0
+- 🔗 **Share alike** - If you modify and distribute this project, you must use the same license
+
+See the [LICENSE](LICENSE) file for full details.
+
+## Disclaimer
+
+### NO WARRANTY
+
+THIS SOFTWARE IS PROVIDED "AS IS" WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED. 
+
+- ❌ **NO GUARANTEE** that this will work for your account or devices
+- ❌ **NO GUARANTEE** of continued functionality or maintenance
+- ❌ **NO SUPPORT** - Issues may or may not be addressed
+- ❌ **USE AT YOUR OWN RISK** - You are solely responsible for any consequences
+
+This is an unofficial tool not affiliated with Xiaomi. The author(s) assume no responsibility for:
+- Account security issues
+- Data loss or exposure
+- Service disruptions
+- Any damages arising from use of this software
+
+**STRONGLY RECOMMENDED**: Deploy your own instance to maintain control over your credentials and data.

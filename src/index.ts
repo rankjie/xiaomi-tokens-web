@@ -3,6 +3,8 @@ import { cors } from 'hono/cors';
 import { XiaomiCloudConnector } from './xiaomi-client';
 import { XiaomiCloudConnectorBrowser } from './xiaomi-client-browser';
 import type { LoginCredentials, LoginResponse, DevicesResponse, SessionData } from './types';
+import { debug } from './utils/debug';
+import { exists } from './utils/sanitize';
 
 const app = new Hono();
 
@@ -167,9 +169,9 @@ app.post('/api/verify-2fa', async (c) => {
       clientState: any;
     }>();
     
-    console.log("[2FA] Received client state keys:", Object.keys(clientState));
-    console.log("[2FA] Client state has sign:", clientState.sign ? 'yes' : 'no');
-    console.log("[2FA] Client state cookies:", Object.keys(clientState.cookies || {}));
+    debug.log("[2FA] Received client state keys:", Object.keys(clientState));
+    debug.log("[2FA] Client state has sign:", exists(clientState.sign));
+    debug.log("[2FA] Client state cookies:", Object.keys(clientState.cookies || {}));
     
     // Recreate client from state
     const client = XiaomiCloudConnectorBrowser.fromClientState(clientState);
@@ -177,14 +179,14 @@ app.post('/api/verify-2fa', async (c) => {
     // Check identity options and verify ticket
     const identityCheck = await (client as any).checkIdentityOptions();
     if (!identityCheck) {
-      console.error("Failed to check identity options");
+      debug.error("Failed to check identity options");
     }
     
-    console.log("[2FA] Before verify2FATicket - Client state:", {
+    debug.log("[2FA] Before verify2FATicket - Client state:", {
       cookies: Object.keys((client as any).cookies),
-      sign: (client as any).sign ? 'present' : 'missing',
-      identitySession: (client as any).identitySession ? 'present' : 'missing',
-      identityOptions: (client as any).identityOptions
+      sign: exists((client as any).sign),
+      identitySession: exists((client as any).identitySession),
+      identityOptions: (client as any).identityOptions?.length || 0
     });
     
     const verifyResult = await client.verify2FATicket(ticket);
@@ -192,11 +194,11 @@ app.post('/api/verify-2fa', async (c) => {
       return c.json<LoginResponse>({ success: false, error: verifyResult.error });
     }
     
-    console.log("[2FA] After verify2FATicket - Client state:", {
+    debug.log("[2FA] After verify2FATicket - Client state:", {
       cookies: Object.keys((client as any).cookies),
-      ssecurity: (client as any).ssecurity ? 'present' : 'missing',
+      ssecurity: exists((client as any).ssecurity),
       userId: (client as any).userId,
-      location: (client as any).location ? 'present' : 'missing'
+      location: exists((client as any).location)
     });
     
     // Clear identity session as per Python implementation
@@ -207,35 +209,35 @@ app.post('/api/verify-2fa', async (c) => {
     
     // After 2FA, we need to get the proper ssecurity token
     // The nonce from STS is not the same as ssecurity
-    console.log("[2FA] Need to get proper ssecurity token after 2FA...");
+    debug.log("[2FA] Need to get proper ssecurity token after 2FA...");
     
     // Always retry loginStep2 to get the ssecurity
     {
-      console.log("[2FA] Retrying login step 2 to get ssecurity...");
-      console.log("[2FA] Current cookies before retry:", (client as any).cookies);
-      console.log("[2FA] Current auth state:", {
+      debug.log("[2FA] Retrying login step 2 to get ssecurity...");
+      debug.log("[2FA] Current cookies before retry:", Object.keys((client as any).cookies || {}));
+      debug.log("[2FA] Current auth state:", {
         userId: (client as any).userId,
-        serviceToken: (client as any).serviceToken ? 'present' : 'missing',
-        ssecurity: (client as any).ssecurity
+        serviceToken: exists((client as any).serviceToken),
+        ssecurity: exists((client as any).ssecurity)
       });
       
       // CRITICAL: Ensure we have the sign token before retrying
       if (!(client as any).sign) {
-        console.error("[2FA] ERROR: Missing sign token after 2FA! This is the likely cause of the issue.");
+        debug.error("[2FA] ERROR: Missing sign token after 2FA! This is the likely cause of the issue.");
         // The sign might have been lost during client state serialization/deserialization
         // Let's check the original client state
-        console.error("[2FA] Original client state had sign:", clientState.sign ? 'yes' : 'no');
+        debug.error("[2FA] Original client state had sign:", exists(clientState.sign));
       }
       
       const step2Result = await client.loginStep2();
       if (!step2Result.success) {
         // Check if it's still asking for 2FA
         if (step2Result.requires2FA) {
-          console.error("[2FA] Still requiring 2FA after verification - session state issue");
-          console.error("[2FA] Final client state:", {
-            cookies: (client as any).cookies,
-            sign: (client as any).sign,
-            ssecurity: (client as any).ssecurity,
+          debug.error("[2FA] Still requiring 2FA after verification - session state issue");
+          debug.error("[2FA] Final client state:", {
+            cookies: Object.keys((client as any).cookies || {}),
+            sign: exists((client as any).sign),
+            ssecurity: exists((client as any).ssecurity),
             userId: (client as any).userId
           });
           return c.json<LoginResponse>({ success: false, error: 'Session state not properly maintained after 2FA' });
@@ -253,7 +255,7 @@ app.post('/api/verify-2fa', async (c) => {
     const session = client.getSessionData();
     return c.json<LoginResponse>({ success: true, session });
   } catch (error: any) {
-    // console.error("2FA endpoint error:", error);
+    // debug.error("2FA endpoint error:", error);
     return c.json<LoginResponse>({ success: false, error: error.message });
   }
 });
@@ -310,7 +312,7 @@ app.post('/api/devices-stream', async (c) => {
             try {
               await writer.write(encoder.encode(`data: ${JSON.stringify({ type: 'progress', ...progress })}\n\n`));
             } catch (e) {
-              console.error('Failed to write progress:', e);
+              debug.error('Failed to write progress:', e);
               writerClosed = true;
             }
           }
@@ -328,24 +330,24 @@ app.post('/api/devices-stream', async (c) => {
         }
         
       } catch (error: any) {
-        console.error('Stream processing error:', error);
+        debug.error('Stream processing error:', error);
         try {
           await writer.write(encoder.encode(`data: ${JSON.stringify({ type: 'error', message: error.message })}\n\n`));
         } catch (e) {
-          console.error('Failed to write error:', e);
+          debug.error('Failed to write error:', e);
         }
       } finally {
         try {
           await writer.close();
         } catch (e) {
-          console.error('Failed to close writer:', e);
+          debug.error('Failed to close writer:', e);
         }
       }
     })();
     
     return c.body(stream.readable);
   } catch (error: any) {
-    // console.error('Stream error:', error);
+    // debug.error('Stream error:', error);
     return c.json({ error: error.message }, 500);
   }
 });
@@ -367,7 +369,7 @@ app.post('/api/devices', async (c) => {
     const result = await client.getDevices(server);
     return c.json<DevicesResponse>(result);
   } catch (error: any) {
-    // console.error('Get devices error:', error);
+    // debug.error('Get devices error:', error);
     return c.json<DevicesResponse>({ success: false, error: error.message });
   }
 });
@@ -873,6 +875,12 @@ function getHtmlContent(): string {
             
             .copy-hint {
                 display: none;
+            }
+            
+            /* Footer links on mobile */
+            .privacy-notice div[style*="display: flex"] {
+                flex-direction: column !important;
+                gap: 0.75rem !important;
             }
         }
         
@@ -1479,6 +1487,10 @@ function getHtmlContent(): string {
             left: 0;
             color: var(--text-muted);
         }
+        
+        a:hover {
+            color: var(--text-secondary) !important;
+        }
     </style>
 </head>
 <body>
@@ -1647,6 +1659,21 @@ function getHtmlContent(): string {
                         <p style="font-size: 0.75rem; color: var(--text-muted); margin: 0; font-weight: 500; letter-spacing: 0.05em;">
                             VERSION 1.2.0
                         </p>
+                        <div style="margin-top: 0.5rem; display: flex; justify-content: center; gap: 1.5rem;">
+                            <a href="https://github.com/rankjie/xiaomi-tokens-web" target="_blank" rel="noopener noreferrer" style="color: var(--text-muted); text-decoration: none; font-size: 0.75rem; display: inline-flex; align-items: center; gap: 0.25rem; transition: color 0.2s;">
+                                <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                                    <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/>
+                                </svg>
+                                <span>GitHub</span>
+                            </a>
+                            <a href="https://github.com/PiotrMachowski/Xiaomi-cloud-tokens-extractor" target="_blank" rel="noopener noreferrer" style="color: var(--text-muted); text-decoration: none; font-size: 0.75rem; display: inline-flex; align-items: center; gap: 0.25rem; transition: color 0.2s;">
+                                <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                                    <path d="M8.75 1.75a.75.75 0 00-1.5 0v2.5h-2.5a.75.75 0 000 1.5h2.5v2.5a.75.75 0 001.5 0v-2.5h2.5a.75.75 0 000-1.5h-2.5v-2.5z"/>
+                                    <path d="M8 13A5 5 0 108 3a5 5 0 000 10zm0 1.5A6.5 6.5 0 108 1.5a6.5 6.5 0 000 13z"/>
+                                </svg>
+                                <span>Original Python Version</span>
+                            </a>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -2016,7 +2043,7 @@ function getHtmlContent(): string {
             
             // Prevent multiple simultaneous loads
             if (isLoadingDevices) {
-                console.log('Already loading devices, skipping...');
+                debug.log('Already loading devices, skipping...');
                 return;
             }
             
@@ -2125,7 +2152,7 @@ function getHtmlContent(): string {
                                         break;
                                 }
                             } catch (e) {
-                                // console.error('Failed to parse SSE data:', e);
+                                // debug.error('Failed to parse SSE data:', e);
                             }
                         }
                     }
@@ -2189,7 +2216,7 @@ function getHtmlContent(): string {
                         break;
                     }
                 } catch (error) {
-                    console.error(\`Error scanning \${region}:\`, error);
+                    debug.error(\`Error scanning \${region}:\`, error);
                 }
             }
             
@@ -2309,7 +2336,7 @@ function getHtmlContent(): string {
                     element.style.borderColor = '';
                 }, 1500);
             }).catch(err => {
-                // console.error('Failed to copy:', err);
+                // debug.error('Failed to copy:', err);
                 showAlert('Failed to copy to clipboard', 'error');
             });
         }

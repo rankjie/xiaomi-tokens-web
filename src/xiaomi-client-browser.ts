@@ -1,4 +1,5 @@
 import { SessionData, Device } from "./types";
+import { debug } from "./utils/debug";
 
 // RC4 implementation for browser
 class RC4 {
@@ -367,14 +368,14 @@ export class XiaomiCloudConnectorBrowser {
       });
 
       const data = await response.json();
-      console.log("[loginStep1] Response data keys:", Object.keys(data));
+      debug.log("[loginStep1] Response data keys:", Object.keys(data));
       if (data && data._sign) {
         this.sign = data._sign;
-        console.log("[loginStep1] Got sign:", this.sign);
+        debug.log("[loginStep1] Got sign:", this.sign ? 'present' : 'missing');
         return true;
       }
     } catch (error) {
-      console.error("Login step 1 failed:", error);
+      debug.error("Login step 1 failed:", error);
     }
     return false;
   }
@@ -383,7 +384,7 @@ export class XiaomiCloudConnectorBrowser {
     const url = "https://account.xiaomi.com/pass/serviceLoginAuth2";
     const hash = await this.hashPassword(this.password);
 
-    console.log("[loginStep2] Starting with state:", {
+    debug.log("[loginStep2] Starting with state:", {
       sign: this.sign ? 'present' : 'missing',
       cookies: Object.keys(this.cookies),
       username: this.username,
@@ -400,9 +401,11 @@ export class XiaomiCloudConnectorBrowser {
       _json: "true"
     };
     
-    console.log("[loginStep2] Request fields:", {
-      ...fields,
-      hash: fields.hash ? 'present' : 'empty'
+    debug.log("[loginStep2] Request fields:", {
+      sid: fields.sid,
+      user: fields.user,
+      hash: fields.hash ? 'present' : 'empty',
+      _sign: fields._sign ? 'present' : 'empty'
     });
 
     try {
@@ -417,14 +420,14 @@ export class XiaomiCloudConnectorBrowser {
       });
 
       if (!response.ok) {
-        console.error("Login step 2 HTTP error:", response.status);
+        debug.error("Login step 2 HTTP error:", response.status);
         const text = await response.text();
-        console.error("Response text:", text);
+        debug.error("Response text:", text);
         return { success: false, error: `HTTP ${response.status}` };
       }
 
       const data = await response.json();
-      console.log("[loginStep2] Response:", {
+      debug.log("[loginStep2] Response:", {
         code: data.code,
         securityStatus: data.securityStatus,
         hasNotificationUrl: !!data.notificationUrl,
@@ -445,11 +448,11 @@ export class XiaomiCloudConnectorBrowser {
         this.location = data.location;
         this.code = data.code;
 
-        console.log("[loginStep2] Login successful, extracted data:", {
+        debug.log("[loginStep2] Login successful, extracted data:", {
           userId: this.userId,
           hasLocation: !!this.location,
           hasSSecurity: !!this.ssecurity,
-          ssecurity: this.ssecurity,
+          ssecurity: this.ssecurity ? 'present' : 'missing',
           cookies: Object.keys(this.cookies)
         });
         
@@ -461,28 +464,28 @@ export class XiaomiCloudConnectorBrowser {
           return { success: false, requires2FA: true, verifyUrl: this.verifyUrl || undefined };
         }
         
-        console.log("[loginStep2] Login failed - no ssecurity or notificationUrl");
+        debug.log("[loginStep2] Login failed - no ssecurity or notificationUrl");
         return { success: false, error: data.desc || "Login failed" };
       }
     } catch (error: any) {
-      console.error("Login step 2 failed:", error);
+      debug.error("Login step 2 failed:", error);
       return { success: false, error: error.message };
     }
   }
 
   async checkIdentityOptions(): Promise<boolean> {
     if (!this.verifyUrl) {
-      console.error("No verify URL available");
+      debug.error("No verify URL available");
       return false;
     }
 
-    console.log("[checkIdentityOptions] Checking from URL:", this.verifyUrl);
-    console.log("[checkIdentityOptions] Current cookies before:", Object.keys(this.cookies));
+    debug.log("[checkIdentityOptions] Checking from URL:", this.verifyUrl);
+    debug.log("[checkIdentityOptions] Current cookies before:", Object.keys(this.cookies));
 
     try {
       // Replace 'identity/authStart' with 'identity/list' as per Python implementation
       const listUrl = this.verifyUrl.replace("identity/authStart", "identity/list");
-      console.log("[checkIdentityOptions] Fetching identity list from:", listUrl);
+      debug.log("[checkIdentityOptions] Fetching identity list from:", listUrl);
 
       const response = await this.proxyFetch(listUrl, {
         headers: {
@@ -492,13 +495,13 @@ export class XiaomiCloudConnectorBrowser {
       });
 
       const text = await response.text();
-      console.log("[checkIdentityOptions] Response preview:", text.substring(0, 200));
-      console.log("[checkIdentityOptions] Cookies after request:", Object.keys(this.cookies));
+      debug.log("[checkIdentityOptions] Response preview:", text.substring(0, 200));
+      debug.log("[checkIdentityOptions] Cookies after request:", Object.keys(this.cookies));
 
       // Extract identity_session cookie
       if (this.cookies.identity_session) {
         this.identitySession = this.cookies.identity_session;
-        console.log("[checkIdentityOptions] Got identity_session:", this.identitySession);
+        debug.log("[checkIdentityOptions] Got identity_session:", this.identitySession ? 'present' : 'missing');
       }
 
       try {
@@ -515,13 +518,13 @@ export class XiaomiCloudConnectorBrowser {
         // console.log("Identity options from API:", this.identityOptions);
         return true;
       } catch (e) {
-        console.error("Failed to parse identity list response:", e);
+        debug.error("Failed to parse identity list response:", e);
         // Default to phone (4) if parsing fails
         this.identityOptions = [4];
         return true;
       }
     } catch (error) {
-      console.error("Failed to check identity options:", error);
+      debug.error("Failed to check identity options:", error);
       // Default to phone (4) if request fails
       this.identityOptions = [4];
       return true;
@@ -529,10 +532,10 @@ export class XiaomiCloudConnectorBrowser {
   }
 
   async verify2FATicket(ticket: string): Promise<{ success: boolean; error?: string }> {
-    console.log("[verify2FATicket] Called with ticket:", ticket);
-    console.log("[verify2FATicket] Initial state:", {
+    debug.log("[verify2FATicket] Called with ticket:", ticket ? 'present' : 'missing');
+    debug.log("[verify2FATicket] Initial state:", {
       identityOptions: this.identityOptions,
-      identitySession: this.identitySession,
+      identitySession: this.identitySession ? 'present' : 'missing',
       cookies: Object.keys(this.cookies),
       sign: this.sign ? 'present' : 'missing'
     });
@@ -583,11 +586,11 @@ export class XiaomiCloudConnectorBrowser {
         // console.log(`Verification response data (flag ${flag}):`, result);
 
         if (result && result.code === 0) {
-          console.log(`[verify2FATicket] Success with flag ${flag}!`);
+          debug.log(`[verify2FATicket] Success with flag ${flag}!`);
           
           // Follow location if provided (as in Python implementation)
           if (result.location) {
-            console.log("[verify2FATicket] Following redirect chain starting from:", result.location);
+            debug.log("[verify2FATicket] Following redirect chain starting from:", result.location);
             
             let currentUrl = result.location;
             let redirectCount = 0;
@@ -608,8 +611,8 @@ export class XiaomiCloudConnectorBrowser {
                   this.parseCookies(response.headers["set-cookie"]);
                 }
                 
-                console.log(`[verify2FATicket] Redirect ${redirectCount + 1} status:`, response.status);
-                console.log(`[verify2FATicket] Redirect ${redirectCount + 1} cookies:`, Object.keys(this.cookies));
+                debug.log(`[verify2FATicket] Redirect ${redirectCount + 1} status:`, response.status);
+                debug.log(`[verify2FATicket] Redirect ${redirectCount + 1} cookies:`, Object.keys(this.cookies));
                 
                 // Check if there's another redirect
                 if (response.status >= 300 && response.status < 400 && response.headers?.location) {
@@ -622,19 +625,19 @@ export class XiaomiCloudConnectorBrowser {
                     const baseUrl = new URL(currentUrl);
                     currentUrl = new URL(redirectLocation, `${baseUrl.protocol}//${baseUrl.host}`).toString();
                   }
-                  console.log(`[verify2FATicket] Following next redirect to:`, currentUrl);
+                  debug.log(`[verify2FATicket] Following next redirect to:`, currentUrl);
                   redirectCount++;
                 } else {
                   // No more redirects, we're done
-                  console.log("[verify2FATicket] Redirect chain complete");
-                  console.log("[verify2FATicket] Final cookies:", Object.keys(this.cookies));
+                  debug.log("[verify2FATicket] Redirect chain complete");
+                  debug.log("[verify2FATicket] Final cookies:", Object.keys(this.cookies));
                   
                   // Extract important values from final URL if it's the STS callback
                   if (currentUrl.includes('sts.api.io.mi.com/sts')) {
                     const urlObj = new URL(currentUrl);
                     const nonce = urlObj.searchParams.get('nonce');
                     if (nonce) {
-                      console.log("[verify2FATicket] Found nonce in STS URL:", nonce);
+                      debug.log("[verify2FATicket] Found nonce in STS URL:", nonce ? 'present' : 'missing');
                       // Note: This nonce is NOT the ssecurity - ssecurity comes from loginStep2
                     }
                   }
@@ -643,10 +646,10 @@ export class XiaomiCloudConnectorBrowser {
               }
               
               if (redirectCount >= maxRedirects) {
-                console.error("[verify2FATicket] Too many redirects");
+                debug.error("[verify2FATicket] Too many redirects");
               }
             } catch (e) {
-              console.log("[verify2FATicket] Redirect follow error:", e);
+              debug.log("[verify2FATicket] Redirect follow error:", e);
             }
           }
           
@@ -656,11 +659,11 @@ export class XiaomiCloudConnectorBrowser {
           // Extract important values from cookies after redirect chain
           if (this.cookies.userId) {
             this.userId = this.cookies.userId;
-            console.log("[verify2FATicket] Extracted userId from cookies:", this.userId);
+            debug.log("[verify2FATicket] Extracted userId from cookies:", this.userId);
           }
           if (this.cookies.serviceToken) {
             this.serviceToken = this.cookies.serviceToken;
-            console.log("[verify2FATicket] Extracted serviceToken from cookies");
+            debug.log("[verify2FATicket] Extracted serviceToken from cookies");
           }
           if (this.cookies.passToken) {
             this.passToken = this.cookies.passToken;
@@ -672,7 +675,7 @@ export class XiaomiCloudConnectorBrowser {
           return { success: true };
         }
       } catch (error) {
-        console.error(`Verification failed for flag ${flag}:`, error);
+        debug.error(`Verification failed for flag ${flag}:`, error);
       }
     }
 
@@ -681,7 +684,7 @@ export class XiaomiCloudConnectorBrowser {
 
   async loginStep3(): Promise<boolean> {
     if (!this.location) {
-      console.error("Login step 3: No location URL");
+      debug.error("Login step 3: No location URL");
       return false;
     }
 
@@ -701,15 +704,15 @@ export class XiaomiCloudConnectorBrowser {
           this.serviceToken = this.cookies.serviceToken;
           return true;
         } else {
-          console.error("Login step 3: No serviceToken in cookies");
+          debug.error("Login step 3: No serviceToken in cookies");
           return false;
         }
       } else {
-        console.error("Login step 3: HTTP error:", response.status);
+        debug.error("Login step 3: HTTP error:", response.status);
         return false;
       }
     } catch (error) {
-      console.error("Login step 3 failed:", error);
+      debug.error("Login step 3 failed:", error);
       return false;
     }
   }
@@ -733,13 +736,13 @@ export class XiaomiCloudConnectorBrowser {
         if (key && value) {
           // Special handling for deviceId - don't override our original deviceId with wb_* values
           if (key === 'deviceId' && value.startsWith('wb_') && this.deviceId && !this.deviceId.startsWith('wb_')) {
-            console.log(`[parseCookies] Ignoring wb_* deviceId (${value}), keeping original: ${this.deviceId}`);
+            debug.log(`[parseCookies] Ignoring wb_* deviceId, keeping original`);
             return;
           }
           
           // Don't set cookies with value 'EXPIRED'
           if (value === 'EXPIRED') {
-            console.log(`[parseCookies] Ignoring expired cookie: ${key}`);
+            debug.log(`[parseCookies] Ignoring expired cookie: ${key}`);
             delete this.cookies[key];
             return;
           }
@@ -751,8 +754,18 @@ export class XiaomiCloudConnectorBrowser {
     });
     
     if (Object.keys(newCookies).length > 0) {
-      console.log("[parseCookies] New cookies set:", Object.keys(newCookies));
-      console.log("[parseCookies] Cookie values:", newCookies);
+      debug.log("[parseCookies] New cookies set:", Object.keys(newCookies));
+      debug.log("[parseCookies] Cookie values:", Object.keys(newCookies).reduce((acc, key) => {
+        // Sanitize sensitive cookie values
+        if (['serviceToken', 'passToken', 'identity_session'].includes(key)) {
+          acc[key] = 'present';
+        } else if (key === 'userId' || key === 'cUserId' || key === 'deviceId') {
+          acc[key] = newCookies[key]; // These are safe to log
+        } else {
+          acc[key] = newCookies[key].substring(0, 8) + '...';
+        }
+        return acc;
+      }, {} as Record<string, string>));
     }
   }
 
@@ -785,12 +798,12 @@ export class XiaomiCloudConnectorBrowser {
 
   private async signedNonce(nonce: string): Promise<string> {
     if (!this.ssecurity) {
-      console.error("No ssecurity available for signing");
+      debug.error("No ssecurity available for signing");
       throw new Error("Missing ssecurity");
     }
 
-    console.log("[signedNonce] Signing with ssecurity:", this.ssecurity);
-    console.log("[signedNonce] Nonce to sign:", nonce);
+    debug.log("[signedNonce] Signing with ssecurity:", this.ssecurity ? 'present' : 'missing');
+    debug.log("[signedNonce] Nonce to sign:", nonce ? 'present' : 'missing');
 
     try {
       // Python: hashlib.sha256(base64.b64decode(self._ssecurity) + base64.b64decode(nonce))
@@ -799,7 +812,7 @@ export class XiaomiCloudConnectorBrowser {
       try {
         ssecurityBytes = Uint8Array.from(atob(this.ssecurity), (c) => c.charCodeAt(0));
       } catch (e) {
-        console.error("[signedNonce] Failed to decode ssecurity as base64, might not be encoded:", e);
+        debug.error("[signedNonce] Failed to decode ssecurity as base64, might not be encoded:", e);
         throw new Error("Invalid ssecurity encoding");
       }
       
@@ -820,7 +833,7 @@ export class XiaomiCloudConnectorBrowser {
       }
       return btoa(binary);
     } catch (error) {
-      console.error("Error in signedNonce:", error);
+      debug.error("Error in signedNonce:", error);
       throw error;
     }
   }
@@ -865,9 +878,9 @@ export class XiaomiCloudConnectorBrowser {
       // Convert to string
       return new TextDecoder().decode(decrypted);
     } catch (error) {
-      console.error("Decryption error:", error);
-      console.error("Payload length:", payload.length);
-      console.error("Payload preview:", payload.substring(0, 100));
+      debug.error("Decryption error:", error);
+      debug.error("Payload length:", payload.length);
+      debug.error("Payload preview:", payload.substring(0, 100));
       throw error;
     }
   }
@@ -948,7 +961,7 @@ export class XiaomiCloudConnectorBrowser {
 
       return btoa(binary);
     } catch (error) {
-      console.error("Error generating signature:", error);
+      debug.error("Error generating signature:", error);
       throw error;
     }
   }
@@ -1019,7 +1032,7 @@ export class XiaomiCloudConnectorBrowser {
       // console.log(`Total devices found: ${allDevices.length}`);
       return { success: true, devices: allDevices };
     } catch (error: any) {
-      console.error("Get devices failed:", error);
+      debug.error("Get devices failed:", error);
       return { success: false, error: error.message };
     }
   }
@@ -1110,9 +1123,9 @@ export class XiaomiCloudConnectorBrowser {
   }
 
   private async executeApiCallEncrypted(url: string, params: Record<string, any>): Promise<any> {
-    console.log("[executeApiCallEncrypted] Called with URL:", url);
-    console.log("[executeApiCallEncrypted] Current auth state:", {
-      ssecurity: this.ssecurity,
+    debug.log("[executeApiCallEncrypted] Called with URL:", url);
+    debug.log("[executeApiCallEncrypted] Current auth state:", {
+      ssecurity: this.ssecurity ? 'present' : 'missing',
       userId: this.userId,
       serviceToken: this.serviceToken ? 'present' : 'missing'
     });
@@ -1146,7 +1159,7 @@ export class XiaomiCloudConnectorBrowser {
 
       // Check if response is an error
       if (!response.ok) {
-        console.error("API error response:", response.status, responseText);
+        debug.error("API error response:", response.status, responseText);
         throw new Error(`API request failed: ${response.status}`);
       }
 
@@ -1157,11 +1170,11 @@ export class XiaomiCloudConnectorBrowser {
       try {
         return JSON.parse(decrypted);
       } catch (e) {
-        console.error("Failed to parse decrypted response:", decrypted.substring(0, 200));
+        debug.error("Failed to parse decrypted response:", decrypted.substring(0, 200));
         throw new Error("Invalid response format");
       }
     } catch (error: any) {
-      console.error("Encrypted API call failed:", error);
+      debug.error("Encrypted API call failed:", error);
       throw error;
     }
   }
@@ -1252,7 +1265,7 @@ export class XiaomiCloudConnectorBrowser {
     });
 
     const cookieString = cookieEntries.join("; ");
-    console.log("[buildCookieString] Final cookie string keys:", cookieEntries.map(c => c.split('=')[0]));
+    debug.log("[buildCookieString] Final cookie string keys:", cookieEntries.map(c => c.split('=')[0]));
     return cookieString;
   }
 
@@ -1346,7 +1359,7 @@ export class XiaomiCloudConnectorBrowser {
     // console.log("Validating session - userId:", this.userId);
 
     if (!this.serviceToken || !this.ssecurity) {
-      console.error("Missing required tokens for validation");
+      debug.error("Missing required tokens for validation");
       return false;
     }
 
@@ -1355,7 +1368,7 @@ export class XiaomiCloudConnectorBrowser {
       const result = await this.getDeviceCount("cn");
       return result.success;
     } catch (error) {
-      console.error("Session validation error:", error);
+      debug.error("Session validation error:", error);
       return false;
     }
   }
@@ -1418,7 +1431,7 @@ export class XiaomiCloudConnectorBrowser {
       }
       return null;
     } catch (error: any) {
-      console.error(`Failed to get beacon key for ${did}:`, error.message);
+      debug.error(`Failed to get beacon key for ${did}:`, error.message);
       return null;
     }
   }

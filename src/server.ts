@@ -1,5 +1,6 @@
 import { serve } from '@hono/node-server';
 import app from './index';
+import { debug } from './utils/debug';
 
 const port = Number(process.env.PORT) || 3000;
 
@@ -8,4 +9,4 @@ serve({
   port
 });
 
-console.log(`Server running at http://localhost:${port}`);
+debug.log(`Server running at http://localhost:${port}`);
