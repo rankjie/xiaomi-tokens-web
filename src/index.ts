@@ -95,6 +95,26 @@ app.get('/', (c) => {
   return c.html(getHtmlContent());
 });
 
+// Serve favicon
+app.get('/favicon.svg', (c) => {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" fill="none">
+  <!-- Background -->
+  <rect width="48" height="48" rx="10" fill="#000000"/>
+  
+  <!-- Mi Logo inspired design -->
+  <path d="M12 16h8v16h-8z" fill="#FF6900"/>
+  <path d="M22 20h6v12h-6z" fill="#FF6900"/>
+  <path d="M30 24h6v8h-6z" fill="#FF6900"/>
+  
+  <!-- Key symbol overlay -->
+  <circle cx="34" cy="14" r="4" fill="none" stroke="#FFFFFF" stroke-width="2"/>
+  <path d="M34 18v6" stroke="#FFFFFF" stroke-width="2"/>
+  <path d="M32 24h4" stroke="#FFFFFF" stroke-width="2"/>
+</svg>`;
+  c.header('Content-Type', 'image/svg+xml');
+  return c.body(svg);
+});
+
 
 // Login endpoint
 app.post('/api/login', async (c) => {
@@ -147,42 +167,87 @@ app.post('/api/verify-2fa', async (c) => {
       clientState: any;
     }>();
     
+    console.log("[2FA] Received client state keys:", Object.keys(clientState));
+    console.log("[2FA] Client state has sign:", clientState.sign ? 'yes' : 'no');
+    console.log("[2FA] Client state cookies:", Object.keys(clientState.cookies || {}));
+    
     // Recreate client from state
     const client = XiaomiCloudConnectorBrowser.fromClientState(clientState);
     
     // Check identity options and verify ticket
     const identityCheck = await (client as any).checkIdentityOptions();
     if (!identityCheck) {
-      // console.error("Failed to check identity options");
+      console.error("Failed to check identity options");
     }
+    
+    console.log("[2FA] Before verify2FATicket - Client state:", {
+      cookies: Object.keys((client as any).cookies),
+      sign: (client as any).sign ? 'present' : 'missing',
+      identitySession: (client as any).identitySession ? 'present' : 'missing',
+      identityOptions: (client as any).identityOptions
+    });
     
     const verifyResult = await client.verify2FATicket(ticket);
     if (!verifyResult.success) {
       return c.json<LoginResponse>({ success: false, error: verifyResult.error });
     }
     
+    console.log("[2FA] After verify2FATicket - Client state:", {
+      cookies: Object.keys((client as any).cookies),
+      ssecurity: (client as any).ssecurity ? 'present' : 'missing',
+      userId: (client as any).userId,
+      location: (client as any).location ? 'present' : 'missing'
+    });
+    
     // Clear identity session as per Python implementation
     (client as any).identitySession = null;
     
-    // Retry login step 2 after successful 2FA (as per Python implementation)
-    // console.log("Retrying login step 2 after 2FA verification...");
-    // console.log("Current cookies before retry:", (client as any).cookies);
-    // console.log("Current sign:", (client as any).sign);
+    // Note: We don't delete the identity_session cookie because Python's session
+    // object manages cookies automatically and may still need it
     
-    const step2Result = await client.loginStep2();
-    if (!step2Result.success) {
-      // Check if it's still asking for 2FA
-      if (step2Result.requires2FA) {
-        // console.error("Still requiring 2FA after verification - session state issue");
-        return c.json<LoginResponse>({ success: false, error: 'Session state not properly maintained after 2FA' });
+    // After 2FA, we need to get the proper ssecurity token
+    // The nonce from STS is not the same as ssecurity
+    console.log("[2FA] Need to get proper ssecurity token after 2FA...");
+    
+    // Always retry loginStep2 to get the ssecurity
+    {
+      console.log("[2FA] Retrying login step 2 to get ssecurity...");
+      console.log("[2FA] Current cookies before retry:", (client as any).cookies);
+      console.log("[2FA] Current auth state:", {
+        userId: (client as any).userId,
+        serviceToken: (client as any).serviceToken ? 'present' : 'missing',
+        ssecurity: (client as any).ssecurity
+      });
+      
+      // CRITICAL: Ensure we have the sign token before retrying
+      if (!(client as any).sign) {
+        console.error("[2FA] ERROR: Missing sign token after 2FA! This is the likely cause of the issue.");
+        // The sign might have been lost during client state serialization/deserialization
+        // Let's check the original client state
+        console.error("[2FA] Original client state had sign:", clientState.sign ? 'yes' : 'no');
       }
-      return c.json<LoginResponse>({ success: false, error: step2Result.error || 'Login failed after 2FA' });
-    }
-    
-    // Complete login with step 3
-    const step3Success = await client.loginStep3();
-    if (!step3Success) {
-      return c.json<LoginResponse>({ success: false, error: 'Login step 3 failed after 2FA' });
+      
+      const step2Result = await client.loginStep2();
+      if (!step2Result.success) {
+        // Check if it's still asking for 2FA
+        if (step2Result.requires2FA) {
+          console.error("[2FA] Still requiring 2FA after verification - session state issue");
+          console.error("[2FA] Final client state:", {
+            cookies: (client as any).cookies,
+            sign: (client as any).sign,
+            ssecurity: (client as any).ssecurity,
+            userId: (client as any).userId
+          });
+          return c.json<LoginResponse>({ success: false, error: 'Session state not properly maintained after 2FA' });
+        }
+        return c.json<LoginResponse>({ success: false, error: step2Result.error || 'Login failed after 2FA' });
+      }
+      
+      // Complete login with step 3
+      const step3Success = await client.loginStep3();
+      if (!step3Success) {
+        return c.json<LoginResponse>({ success: false, error: 'Login step 3 failed after 2FA' });
+      }
     }
     
     const session = client.getSessionData();
@@ -329,25 +394,38 @@ function getHtmlContent(): string {
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Xiaomi Cloud Tokens Extractor</title>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+    <link rel="alternate icon" href="/favicon.ico">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
         :root {
             --primary: #ff6900;
             --primary-dark: #e55a00;
             --primary-light: #ff8533;
-            --bg: #f8f9fa;
-            --card-bg: white;
-            --text: #212529;
-            --text-secondary: #6c757d;
-            --border: #dee2e6;
-            --border-light: #e9ecef;
-            --success: #28a745;
-            --error: #dc3545;
-            --warning: #ffc107;
-            --info: #17a2b8;
-            --shadow: 0 0.125rem 0.25rem rgba(0,0,0,0.075);
-            --shadow-lg: 0 0.5rem 1rem rgba(0,0,0,0.15);
-            --radius: 0.375rem;
-            --radius-lg: 0.5rem;
+            --bg: #000000;
+            --bg-secondary: #111111;
+            --card-bg: #000000;
+            --card-bg-hover: #0a0a0a;
+            --text: #ffffff;
+            --text-secondary: #888888;
+            --text-muted: #666666;
+            --border: #333333;
+            --border-light: #222222;
+            --border-hover: #444444;
+            --success: #10b981;
+            --error: #ef4444;
+            --warning: #f59e0b;
+            --info: #3b82f6;
+            --shadow: 0 1px 3px rgba(0,0,0,0.12), 0 1px 2px rgba(0,0,0,0.24);
+            --shadow-lg: 0 10px 40px rgba(0,0,0,0.3);
+            --shadow-xl: 0 20px 60px rgba(0,0,0,0.5);
+            --radius: 0.5rem;
+            --radius-lg: 0.75rem;
+            --radius-xl: 1rem;
+            --gradient: linear-gradient(135deg, #ff6900 0%, #ff8533 100%);
+            --gradient-dark: linear-gradient(135deg, #1a1a1a 0%, #2d2d2d 100%);
         }
         
         * {
@@ -357,114 +435,184 @@ function getHtmlContent(): string {
         }
         
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             background: var(--bg);
             color: var(--text);
             line-height: 1.6;
             -webkit-font-smoothing: antialiased;
             -moz-osx-font-smoothing: grayscale;
+            min-height: 100vh;
+            position: relative;
+            overflow-x: hidden;
+        }
+        
+        body::before {
+            content: '';
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: 
+                radial-gradient(circle at 20% 50%, rgba(255, 105, 0, 0.15) 0%, transparent 50%),
+                radial-gradient(circle at 80% 80%, rgba(255, 105, 0, 0.1) 0%, transparent 50%),
+                radial-gradient(circle at 40% 20%, rgba(255, 133, 51, 0.1) 0%, transparent 50%);
+            pointer-events: none;
+            z-index: 0;
         }
         
         .container {
-            max-width: 1400px;
+            max-width: 1200px;
             margin: 0 auto;
             padding: 2rem;
+            position: relative;
+            z-index: 1;
         }
         
         .header {
             text-align: center;
-            margin-bottom: 3rem;
+            margin-bottom: 4rem;
+            position: relative;
         }
         
         h1 {
-            font-size: 2.5rem;
+            font-size: 3.5rem;
             font-weight: 700;
-            background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
+            letter-spacing: -0.02em;
+            margin-bottom: 1rem;
+            background: linear-gradient(to bottom right, #ffffff 30%, var(--primary) 70%);
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
-            margin-bottom: 0.5rem;
+            background-clip: text;
+            text-fill-color: transparent;
+            animation: fadeInUp 0.8s ease-out;
+        }
+        
+        @keyframes fadeInUp {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
         }
         
         .subtitle {
             color: var(--text-secondary);
-            font-size: 1.125rem;
+            font-size: 1.25rem;
+            font-weight: 400;
+            letter-spacing: -0.01em;
+            animation: fadeInUp 0.8s ease-out 0.2s both;
         }
         
         .card {
             background: var(--card-bg);
-            border-radius: var(--radius-lg);
-            padding: 2rem;
-            margin-bottom: 1.5rem;
-            box-shadow: var(--shadow);
             border: 1px solid var(--border-light);
-            transition: box-shadow 0.3s ease;
+            border-radius: var(--radius-xl);
+            padding: 2.5rem;
+            margin-bottom: 2rem;
+            position: relative;
+            transition: all 0.3s ease;
+            overflow: hidden;
+        }
+        
+        .card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 1px;
+            background: linear-gradient(90deg, transparent, var(--primary), transparent);
+            opacity: 0;
+            transition: opacity 0.3s ease;
         }
         
         .card:hover {
-            box-shadow: var(--shadow-lg);
+            border-color: var(--border-hover);
+            background: var(--card-bg-hover);
+            transform: translateY(-2px);
+        }
+        
+        .card:hover::before {
+            opacity: 1;
         }
         
         .card-header {
             display: flex;
             align-items: center;
-            margin-bottom: 1.5rem;
-            padding-bottom: 1rem;
+            margin-bottom: 2rem;
+            padding-bottom: 1.5rem;
             border-bottom: 1px solid var(--border-light);
         }
         
         .card-icon {
-            width: 40px;
-            height: 40px;
-            background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
-            border-radius: var(--radius);
+            width: 48px;
+            height: 48px;
+            background: var(--gradient);
+            border-radius: 12px;
             display: flex;
             align-items: center;
             justify-content: center;
             margin-right: 1rem;
-            color: white;
-            font-size: 1.25rem;
+            font-size: 1.5rem;
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .card-icon::after {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 100%;
+            height: 100%;
+            background: radial-gradient(circle, rgba(255,255,255,0.2) 0%, transparent 70%);
+            transform: translate(-50%, -50%);
         }
         
         .card h2 {
-            font-size: 1.5rem;
+            font-size: 1.75rem;
             font-weight: 600;
             color: var(--text);
+            letter-spacing: -0.01em;
         }
         
         .auth-tabs {
             display: flex;
-            border-bottom: 2px solid var(--border-light);
-            margin-bottom: 2rem;
+            gap: 1rem;
+            margin-bottom: 2.5rem;
         }
         
         .auth-tab {
-            flex: 1;
-            padding: 1rem;
+            padding: 0.5rem 1rem;
             background: none;
             border: none;
-            border-bottom: 3px solid transparent;
-            color: var(--text-secondary);
-            font-size: 1rem;
-            font-weight: 500;
+            color: var(--text-muted);
+            font-size: 0.875rem;
+            font-weight: 400;
             cursor: pointer;
-            transition: all 0.3s;
+            transition: none;
+            display: inline-block;
             box-shadow: none;
-            border-radius: 0;
-            display: block;
-            gap: 0;
+            transform: none;
         }
         
         .auth-tab:hover {
-            color: var(--text);
-            background: var(--bg);
+            color: var(--text-secondary);
             transform: none;
             box-shadow: none;
         }
         
+        .auth-tab:active {
+            transform: none;
+        }
+        
         .auth-tab.active {
-            color: var(--primary);
-            border-bottom-color: var(--primary);
-            background: transparent;
+            color: var(--text);
+            font-weight: 500;
         }
         
         .auth-content {
@@ -477,55 +625,254 @@ function getHtmlContent(): string {
         
         .drop-zone {
             border: 2px dashed var(--border);
-            border-radius: var(--radius-lg);
-            padding: 3rem 2rem;
+            border-radius: var(--radius-xl);
+            padding: 4rem 2rem;
             text-align: center;
-            transition: all 0.3s;
+            transition: all 0.3s ease;
             cursor: pointer;
-            background: var(--bg);
+            background: var(--bg-secondary);
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .drop-zone::before {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 200%;
+            height: 200%;
+            background: radial-gradient(circle, var(--primary) 0%, transparent 70%);
+            transform: translate(-50%, -50%) scale(0);
+            opacity: 0.1;
+            transition: transform 0.5s ease;
+        }
+        
+        .drop-zone:hover::before,
+        .drop-zone.drag-over::before {
+            transform: translate(-50%, -50%) scale(1);
         }
         
         .drop-zone:hover,
         .drop-zone.drag-over {
             border-color: var(--primary);
-            background: rgba(255, 105, 0, 0.05);
+            background: var(--bg-secondary);
         }
         
         .drop-zone-icon {
             font-size: 3rem;
             margin-bottom: 1rem;
-            opacity: 0.5;
+            filter: grayscale(100%);
+            opacity: 0.3;
+            transition: all 0.3s ease;
         }
         
+        .drop-zone:hover .drop-zone-icon {
+            filter: grayscale(0%);
+            opacity: 1;
+            transform: scale(1.1);
+        }
+        
+        /* Mobile Responsive Styles */
         @media (max-width: 768px) {
+            body {
+                font-size: 14px;
+            }
+            
             .container {
                 padding: 1rem;
+                max-width: 100%;
             }
             
-            .devices-grid {
-                grid-template-columns: 1fr;
+            .header {
+                margin-bottom: 2rem;
             }
             
-            h1 {
-                font-size: 2rem;
+            .header h1 {
+                font-size: 1.75rem;
+            }
+            
+            .header .subtitle {
+                font-size: 0.875rem;
             }
             
             .card {
-                padding: 1.5rem;
+                padding: 1.25rem;
+                margin-bottom: 1rem;
+            }
+            
+            .card-header {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 1rem;
+                margin-bottom: 1rem;
             }
             
             .card-header > div:first-child {
-                flex-direction: column;
-                align-items: flex-start;
+                flex-direction: row;
+                align-items: center;
             }
             
             .card-header > div:last-child {
-                margin-top: 1rem;
+                margin-top: 0;
                 width: 100%;
             }
             
             .card-header button {
-                width: 48%;
+                width: auto;
+                flex: 1;
+            }
+            
+            /* Stack server controls on mobile */
+            #devicesSection .card-header > div:last-child {
+                flex-direction: column !important;
+                gap: 0.75rem !important;
+            }
+            
+            #serverSelector, #refreshDevicesBtn {
+                width: 100% !important;
+                height: 44px !important;
+            }
+            
+            /* Fix mobile colors */
+            @media (prefers-color-scheme: light) {
+                select, input {
+                    -webkit-appearance: none;
+                    appearance: none;
+                }
+            }
+            
+            .auth-tabs {
+                font-size: 0.875rem;
+            }
+            
+            .form-group {
+                margin-bottom: 1rem;
+            }
+            
+            input, select, button {
+                font-size: 16px; /* Prevents zoom on iOS */
+                padding: 0.875rem 1rem;
+            }
+            
+            .devices-grid {
+                grid-template-columns: 1fr;
+                gap: 0.75rem;
+            }
+            
+            .device-item {
+                padding: 1rem;
+            }
+            
+            .device-info {
+                grid-template-columns: 1fr;
+                gap: 0.5rem;
+            }
+            
+            .device-detail {
+                padding: 0.5rem;
+                font-size: 0.8125rem;
+            }
+            
+            .privacy-notice {
+                padding: 1.25rem;
+            }
+            
+            .privacy-section h4 {
+                font-size: 1rem;
+            }
+            
+            /* Make buttons touch-friendly */
+            button {
+                min-height: 44px;
+                touch-action: manipulation;
+            }
+            
+            /* Fix alert positioning on mobile */
+            #alerts {
+                right: 1rem;
+                left: 1rem;
+                width: auto;
+                max-width: none;
+            }
+            
+            /* Make dropzone more mobile-friendly */
+            .drop-zone {
+                padding: 2rem 1rem;
+            }
+            
+            /* Fix verify URL box */
+            .verify-url {
+                font-size: 0.75rem;
+                padding: 0.75rem;
+            }
+            
+            /* Adjust loading spinner */
+            .loading {
+                width: 16px;
+                height: 16px;
+            }
+            
+            /* Stack authenticated session info */
+            .card-header div[style*="display: flex; gap: 1.5rem"] {
+                flex-direction: column !important;
+                gap: 0.5rem !important;
+                align-items: flex-start !important;
+            }
+        }
+        
+        /* Smaller mobile devices */
+        @media (max-width: 480px) {
+            .header h1 {
+                font-size: 1.5rem;
+            }
+            
+            .card {
+                padding: 1rem;
+            }
+            
+            .privacy-notice {
+                padding: 1rem;
+            }
+            
+            .drop-zone {
+                padding: 1.5rem 1rem;
+            }
+            
+            .drop-zone-icon {
+                font-size: 2rem;
+            }
+            
+            .devices-grid {
+                margin: 0 -0.5rem;
+            }
+            
+            .device-item {
+                margin: 0 0.5rem;
+                padding: 0.875rem;
+            }
+            
+            .info-row {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 0.25rem;
+            }
+            
+            .info-row dt {
+                min-width: auto;
+                margin-bottom: 0.25rem;
+            }
+            
+            .info-row dd {
+                width: 100%;
+                font-size: 0.75rem;
+                padding: 0.5rem 0.75rem;
+                word-break: break-all;
+                hyphens: auto;
+            }
+            
+            .copy-hint {
+                display: none;
             }
         }
         
@@ -537,46 +884,92 @@ function getHtmlContent(): string {
             display: block;
             margin-bottom: 0.5rem;
             font-weight: 500;
-            color: var(--text);
+            color: var(--text-secondary);
             font-size: 0.875rem;
+            letter-spacing: -0.01em;
         }
         
         input, select {
             width: 100%;
-            padding: 0.75rem 1rem;
-            border: 2px solid var(--border-light);
+            padding: 0.875rem 1rem;
+            border: 1px solid var(--border);
             border-radius: var(--radius);
             font-size: 1rem;
-            transition: border-color 0.3s, box-shadow 0.3s;
-            background-color: var(--bg);
+            font-weight: 400;
+            transition: all 0.2s ease;
+            background-color: var(--bg-secondary);
+            color: var(--text);
+            -webkit-appearance: none;
+            appearance: none;
+        }
+        
+        select {
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23888' d='M10.293 3.293L6 7.586 1.707 3.293A1 1 0 00.293 4.707l5 5a1 1 0 001.414 0l5-5a1 1 0 10-1.414-1.414z'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 1rem center;
+            padding-right: 2.5rem;
+        }
+        
+        select option {
+            background-color: var(--bg-secondary);
+            color: var(--text);
+        }
+        
+        input::placeholder {
+            color: var(--text-muted);
+        }
+        
+        input:hover, select:hover {
+            border-color: var(--border-hover);
         }
         
         input:focus, select:focus {
             outline: none;
             border-color: var(--primary);
-            box-shadow: 0 0 0 3px rgba(255, 105, 0, 0.1);
+            background-color: var(--card-bg);
+            box-shadow: 0 0 0 1px var(--primary);
         }
         
         button {
-            background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
+            background: var(--gradient);
             color: white;
             border: none;
-            padding: 0.75rem 1.5rem;
+            padding: 0.875rem 2rem;
             border-radius: var(--radius);
             cursor: pointer;
-            font-size: 1rem;
+            font-size: 0.875rem;
             font-weight: 500;
-            transition: transform 0.2s, box-shadow 0.2s;
-            box-shadow: 0 2px 4px rgba(255, 105, 0, 0.2);
+            letter-spacing: -0.01em;
+            transition: all 0.2s ease;
             display: inline-flex;
             align-items: center;
             justify-content: center;
             gap: 0.5rem;
+            position: relative;
+            overflow: hidden;
+        }
+        
+        button::before {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 0;
+            height: 0;
+            background: rgba(255,255,255,0.2);
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+            transition: width 0.6s, height 0.6s;
+        }
+        
+        button:hover::before {
+            width: 300px;
+            height: 300px;
         }
         
         button:hover {
-            transform: translateY(-1px);
-            box-shadow: 0 4px 8px rgba(255, 105, 0, 0.3);
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(255, 105, 0, 0.3);
         }
         
         button:active {
@@ -584,7 +977,7 @@ function getHtmlContent(): string {
         }
         
         button:disabled {
-            opacity: 0.6;
+            opacity: 0.5;
             cursor: not-allowed;
             transform: none;
         }
@@ -597,31 +990,46 @@ function getHtmlContent(): string {
         
         .button-secondary {
             background: transparent;
-            color: var(--primary);
-            border: 2px solid var(--primary);
+            color: var(--text-secondary);
+            border: 1px solid var(--border);
             box-shadow: none;
+            font-weight: 400;
+        }
+        
+        .button-secondary::before {
+            background: transparent;
         }
         
         .button-secondary:hover {
-            background: var(--primary);
-            color: white;
+            color: var(--text);
+            border-color: var(--primary);
+            background: transparent;
+            box-shadow: none;
+        }
+        
+        .button-secondary:hover::before {
+            width: 0;
+            height: 0;
         }
         
         #alerts {
             position: fixed;
-            top: 1rem;
-            right: 1rem;
+            top: 2rem;
+            right: 2rem;
             z-index: 1000;
             display: flex;
             flex-direction: column;
-            gap: 0.5rem;
+            gap: 1rem;
             max-width: 400px;
         }
         
         .alert {
             padding: 1rem 1.5rem;
-            border-radius: var(--radius);
-            box-shadow: var(--shadow-lg);
+            border-radius: var(--radius-lg);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            background: rgba(0,0,0,0.8);
+            border: 1px solid var(--border-light);
             display: flex;
             align-items: center;
             gap: 0.75rem;
@@ -651,33 +1059,23 @@ function getHtmlContent(): string {
         }
         
         .alert-success {
-            background: white;
+            border-left: 3px solid var(--success);
             color: var(--success);
-            border: 1px solid #d4edda;
-        }
-        
-        .alert-success::before {
-            background: var(--success);
         }
         
         .alert-error {
-            background: white;
+            border-left: 3px solid var(--error);
             color: var(--error);
-            border: 1px solid #f8d7da;
-        }
-        
-        .alert-error::before {
-            background: var(--error);
         }
         
         .alert-warning {
-            background: white;
+            border-left: 3px solid var(--warning);
             color: var(--warning);
-            border: 1px solid #fff3cd;
         }
         
-        .alert-warning::before {
-            background: var(--warning);
+        .alert-info {
+            border-left: 3px solid var(--info);
+            color: var(--info);
         }
         
         .device-list {
@@ -687,18 +1085,31 @@ function getHtmlContent(): string {
         
         .devices-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
+            grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
             gap: 1.5rem;
         }
         
         .device-item {
             background: var(--card-bg);
             padding: 1.5rem;
-            border-radius: var(--radius-lg);
+            border-radius: var(--radius-xl);
             border: 1px solid var(--border-light);
             transition: all 0.3s ease;
-            animation: slideIn 0.3s ease;
-            box-shadow: var(--shadow);
+            animation: slideIn 0.5s ease;
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .device-item::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 1px;
+            background: linear-gradient(90deg, transparent, var(--primary), transparent);
+            opacity: 0;
+            transition: opacity 0.3s ease;
         }
         
         @keyframes slideIn {
@@ -713,16 +1124,21 @@ function getHtmlContent(): string {
         }
         
         .device-item:hover {
-            box-shadow: var(--shadow-lg);
-            transform: translateY(-2px);
+            border-color: var(--border-hover);
+            background: var(--card-bg-hover);
+            transform: translateY(-4px);
+        }
+        
+        .device-item:hover::before {
+            opacity: 1;
         }
         
         .device-header {
             display: flex;
             justify-content: space-between;
-            align-items: center;
-            margin-bottom: 1rem;
-            padding-bottom: 1rem;
+            align-items: flex-start;
+            margin-bottom: 1.5rem;
+            padding-bottom: 1.5rem;
             border-bottom: 1px solid var(--border-light);
         }
         
@@ -731,32 +1147,57 @@ function getHtmlContent(): string {
             color: var(--text);
             font-size: 1.125rem;
             line-height: 1.2;
+            letter-spacing: -0.01em;
         }
         
         .device-status {
             display: flex;
             align-items: center;
             gap: 0.5rem;
-            font-size: 0.875rem;
+            font-size: 0.75rem;
+            font-weight: 500;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
             color: var(--text-secondary);
         }
         
         .status-dot {
-            width: 8px;
-            height: 8px;
+            width: 6px;
+            height: 6px;
             border-radius: 50%;
-            background: var(--border);
+            background: var(--text-muted);
+            position: relative;
         }
         
         .status-dot.online {
             background: var(--success);
-            box-shadow: 0 0 0 2px rgba(40, 167, 69, 0.2);
+        }
+        
+        .status-dot.online::before {
+            content: '';
+            position: absolute;
+            top: -3px;
+            left: -3px;
+            right: -3px;
+            bottom: -3px;
+            border-radius: 50%;
+            background: var(--success);
+            opacity: 0.3;
+            animation: pulse 2s infinite;
+        }
+        
+        @keyframes pulse {
+            0% { transform: scale(1); opacity: 0.3; }
+            50% { transform: scale(1.5); opacity: 0; }
+            100% { transform: scale(1); opacity: 0.3; }
         }
         
         .device-info {
             display: flex;
             flex-direction: column;
             gap: 0.75rem;
+            min-width: 0;
+            width: 100%;
         }
         
         .info-row {
@@ -764,12 +1205,13 @@ function getHtmlContent(): string {
             align-items: center;
             gap: 0.5rem;
             position: relative;
+            min-width: 0;
         }
         
         .info-row dt {
             font-weight: 500;
-            color: var(--text-secondary);
-            font-size: 0.75rem;
+            color: var(--text-muted);
+            font-size: 0.6875rem;
             text-transform: uppercase;
             letter-spacing: 0.05em;
             min-width: 60px;
@@ -777,37 +1219,44 @@ function getHtmlContent(): string {
         
         .info-row dd {
             flex: 1;
-            font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;
-            font-size: 0.875rem;
-            color: var(--text);
+            font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+            font-size: 0.8125rem;
+            color: var(--text-secondary);
             margin: 0;
-            padding: 0.5rem 0.75rem;
-            background: var(--bg);
+            padding: 0.625rem 0.875rem;
+            background: var(--bg-secondary);
             border-radius: var(--radius);
-            border: 2px solid var(--border-light);
-            word-break: break-all;
+            border: 1px solid transparent;
+            word-break: break-word;
+            overflow-wrap: break-word;
             cursor: pointer;
-            transition: all 0.2s ease;
+            transition: all 0.15s ease;
             position: relative;
             overflow: hidden;
+            min-width: 0;
         }
         
         .info-row dd:hover {
-            background: white;
-            border-color: var(--primary);
-            transform: translateY(-1px);
-            box-shadow: 0 2px 8px rgba(255, 105, 0, 0.15);
+            background: var(--card-bg);
+            border-color: var(--border);
+            color: var(--text);
+            transform: translateX(2px);
         }
         
         .info-row dd:active {
-            transform: translateY(0);
-            box-shadow: 0 1px 4px rgba(255, 105, 0, 0.15);
+            transform: translateX(0);
         }
         
         .info-row dd.token {
-            background: #fff5e6;
-            border-color: #ffd4a3;
+            background: rgba(255, 105, 0, 0.1);
+            border-color: rgba(255, 105, 0, 0.2);
+            color: var(--primary-light);
             font-weight: 500;
+        }
+        
+        .info-row dd.token:hover {
+            background: rgba(255, 105, 0, 0.15);
+            border-color: rgba(255, 105, 0, 0.3);
         }
         
         .copy-hint {
@@ -815,11 +1264,14 @@ function getHtmlContent(): string {
             right: 0.75rem;
             top: 50%;
             transform: translateY(-50%);
-            font-size: 0.75rem;
-            color: var(--text-secondary);
+            font-size: 0.625rem;
+            color: var(--text-muted);
             opacity: 0;
-            transition: opacity 0.2s;
+            transition: opacity 0.15s;
             pointer-events: none;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            font-weight: 500;
         }
         
         .info-row dd:hover .copy-hint {
@@ -828,30 +1280,49 @@ function getHtmlContent(): string {
         
         
         .progress-container {
-            background: #fff;
-            border: 1px solid var(--border);
-            border-radius: 8px;
-            padding: 20px;
-            margin-bottom: 20px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-light);
+            border-radius: var(--radius-lg);
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
         }
         
         .progress-message {
-            color: #666;
-            margin-bottom: 10px;
+            color: var(--text-secondary);
+            margin-bottom: 1rem;
+            font-size: 0.875rem;
         }
         
         .progress-bar {
             width: 100%;
-            height: 4px;
-            background: #f0f0f0;
+            height: 2px;
+            background: var(--border);
             border-radius: 2px;
             overflow: hidden;
+            position: relative;
         }
         
         .progress-bar-fill {
             height: 100%;
-            background: var(--primary);
+            background: var(--gradient);
             transition: width 0.3s ease;
+            position: relative;
+        }
+        
+        .progress-bar-fill::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            right: 0;
+            bottom: 0;
+            width: 100px;
+            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.3));
+            animation: shimmer 1.5s infinite;
+        }
+        
+        @keyframes shimmer {
+            0% { transform: translateX(-100px); }
+            100% { transform: translateX(100px); }
         }
         
         .file-actions {
@@ -865,26 +1336,41 @@ function getHtmlContent(): string {
         }
         
         #verifySection {
-            background: #fff3e0;
-            padding: 20px;
-            border-radius: 4px;
-            margin-top: 20px;
+            border: 1px solid var(--warning);
+            background: rgba(245, 158, 11, 0.1);
+        }
+        
+        #verifySection .card-icon {
+            background: var(--warning);
+        }
+        
+        #verifySection ol {
+            color: var(--text-secondary);
+            line-height: 2;
+            margin: 1.5rem 0;
+        }
+        
+        #verifySection strong {
+            color: var(--error);
+            font-weight: 600;
         }
         
         .verify-url {
-            background: #f5f5f5;
-            padding: 10px;
-            border-radius: 4px;
+            background: var(--bg-secondary);
+            padding: 1rem;
+            border-radius: var(--radius);
             word-break: break-all;
-            margin: 10px 0;
+            margin: 0.5rem 0;
             font-family: monospace;
             overflow-x: auto;
             white-space: nowrap;
+            border: 1px solid var(--border);
         }
         
         .verify-url a {
             color: var(--primary);
             text-decoration: none;
+            font-size: 0.875rem;
         }
         
         .verify-url a:hover {
@@ -893,12 +1379,12 @@ function getHtmlContent(): string {
         
         .loading {
             display: inline-block;
-            width: 20px;
-            height: 20px;
-            border: 3px solid rgba(255,255,255,.3);
+            width: 16px;
+            height: 16px;
+            border: 2px solid rgba(255,255,255,.2);
             border-radius: 50%;
             border-top-color: white;
-            animation: spin 1s ease-in-out infinite;
+            animation: spin 0.8s linear infinite;
             vertical-align: middle;
             margin: 0;
         }
@@ -908,11 +1394,11 @@ function getHtmlContent(): string {
         }
         
         .privacy-notice {
-            background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
-            border: 1px solid var(--border);
-            border-radius: var(--radius-lg);
-            padding: 2rem;
-            margin-top: 3rem;
+            background: var(--gradient-dark);
+            border: 1px solid var(--border-light);
+            border-radius: var(--radius-xl);
+            padding: 3rem;
+            margin-top: 4rem;
             position: relative;
             overflow: hidden;
         }
@@ -920,29 +1406,43 @@ function getHtmlContent(): string {
         .privacy-notice::before {
             content: '';
             position: absolute;
-            top: 0;
-            left: 0;
-            width: 4px;
-            height: 100%;
-            background: linear-gradient(180deg, var(--primary) 0%, var(--primary-dark) 100%);
+            top: -50%;
+            right: -50%;
+            width: 200%;
+            height: 200%;
+            background: radial-gradient(circle, rgba(255, 105, 0, 0.1) 0%, transparent 70%);
+            animation: rotate 20s linear infinite;
+        }
+        
+        @keyframes rotate {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
         }
         
         .privacy-notice h3 {
             color: var(--text);
-            margin-bottom: 1rem;
+            margin-bottom: 2rem;
             display: flex;
             align-items: center;
             gap: 0.75rem;
-            font-size: 1.25rem;
+            font-size: 1.5rem;
+            font-weight: 600;
+            letter-spacing: -0.01em;
+            position: relative;
+            z-index: 1;
         }
         
         .privacy-notice .icon {
-            font-size: 1.5rem;
+            font-size: 1.75rem;
+            filter: grayscale(100%);
+            opacity: 0.5;
         }
         
         .privacy-content {
             color: var(--text-secondary);
             line-height: 1.8;
+            position: relative;
+            z-index: 1;
         }
         
         .privacy-section {
@@ -951,9 +1451,10 @@ function getHtmlContent(): string {
         
         .privacy-section h4 {
             color: var(--text);
-            font-size: 1rem;
-            margin-bottom: 0.5rem;
+            font-size: 1.125rem;
+            margin-bottom: 0.75rem;
             font-weight: 600;
+            letter-spacing: -0.01em;
         }
         
         .privacy-section p {
@@ -976,7 +1477,7 @@ function getHtmlContent(): string {
             content: '→';
             position: absolute;
             left: 0;
-            color: var(--primary);
+            color: var(--text-muted);
         }
     </style>
 </head>
@@ -1001,8 +1502,11 @@ function getHtmlContent(): string {
             <div id="loginTab" class="auth-content active">
                 <form id="loginForm">
                     <div class="form-group">
-                        <label for="username">Username (Email/Phone)</label>
-                        <input type="text" id="username" name="username" required placeholder="email@example.com or phone number">
+                        <label for="username">Username</label>
+                        <input type="text" id="username" name="username" required placeholder="Email, phone number, or Xiaomi ID">
+                        <small style="color: var(--text-secondary); font-size: 0.75rem; margin-top: 0.25rem; display: block;">
+                            Accepts: Email address, phone number (mostly CN accounts), or Xiaomi account ID
+                        </small>
                     </div>
                     <div class="form-group">
                         <label for="password">Password</label>
@@ -1010,16 +1514,20 @@ function getHtmlContent(): string {
                     </div>
                     <div class="form-group">
                         <label for="server">Server Region</label>
-                        <select id="server" name="server">
-                            <option value="cn">China (cn)</option>
-                            <option value="de">Germany (de)</option>
-                            <option value="us">United States (us)</option>
-                            <option value="ru">Russia (ru)</option>
-                            <option value="tw">Taiwan (tw)</option>
-                            <option value="sg">Singapore (sg)</option>
-                            <option value="in">India (in)</option>
-                            <option value="i2">International (i2)</option>
+                        <select id="server" name="server" title="Select the region where you registered your Xiaomi account">
+                            <option value="cn">🇨🇳 China (cn) - Mainland China</option>
+                            <option value="de">🇩🇪 Germany (de) - Europe</option>
+                            <option value="us">🇺🇸 United States (us) - Americas</option>
+                            <option value="ru">🇷🇺 Russia (ru) - Russia/CIS</option>
+                            <option value="tw">🇹🇼 Taiwan (tw) - Taiwan</option>
+                            <option value="sg">🇸🇬 Singapore (sg) - Southeast Asia</option>
+                            <option value="in">🇮🇳 India (in) - India</option>
+                            <option value="i2">🌍 International (i2) - Other regions</option>
                         </select>
+                        <small style="color: var(--text-secondary); font-size: 0.75rem; margin-top: 0.25rem; display: block;">
+                            💡 Choose the region where you created your Xiaomi account or where your devices were purchased<br>
+                            You can switch to other regions after login without re-authenticating
+                        </small>
                     </div>
                     <button type="submit" id="loginBtn">Login</button>
                 </form>
@@ -1068,15 +1576,26 @@ function getHtmlContent(): string {
         
         
         <div id="devicesSection" class="card hidden">
-            <div class="card-header" style="justify-content: space-between; align-items: center;">
+            <div class="card-header" style="margin-bottom: 0; justify-content: space-between; align-items: center;">
                 <div style="display: flex; align-items: center;">
                     <div class="card-icon">📱</div>
-                    <h2>Devices</h2>
+                    <h2 style="margin-bottom: 0;">Devices</h2>
                 </div>
-                <button id="refreshDevicesBtn" class="button-secondary" style="padding: 0.5rem 1rem; font-size: 0.875rem;" onclick="loadDevices()">
-                    🔄 Refresh Devices
-                </button>
+                <div style="display: flex; align-items: center; gap: 0.5rem;">
+                    <select id="serverSelector" style="padding: 0.5rem 1rem; padding-right: 2.5rem; font-size: 0.875rem; border: 1px solid var(--border); border-radius: var(--radius); background-color: var(--bg-secondary); color: var(--text); height: 36px; -webkit-appearance: none; appearance: none; background-image: url(&quot;data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23888' d='M10.293 3.293L6 7.586 1.707 3.293A1 1 0 00.293 4.707l5 5a1 1 0 001.414 0l5-5a1 1 0 10-1.414-1.414z'/%3E%3C/svg%3E&quot;); background-repeat: no-repeat; background-position: right 0.5rem center;" onchange="loadDevices(false)" title="Select the server region where your devices are registered">
+                        <option value="cn">🇨🇳 China (cn) - Mainland China</option>
+                        <option value="de">🇩🇪 Germany (de) - Europe</option>
+                        <option value="us">🇺🇸 United States (us) - Americas</option>
+                        <option value="ru">🇷🇺 Russia (ru) - Russia/CIS</option>
+                        <option value="tw">🇹🇼 Taiwan (tw) - Taiwan</option>
+                        <option value="sg">🇸🇬 Singapore (sg) - Southeast Asia</option>
+                        <option value="in">🇮🇳 India (in) - India</option>
+                        <option value="i2">🌍 International (i2) - Other regions</option>
+                    </select>
+                    <button id="refreshDevicesBtn" class="button-secondary" style="padding: 0.5rem 1rem; font-size: 0.875rem; white-space: nowrap; height: 36px;" onclick="loadDevices(false)">🔄 Refresh</button>
+                </div>
             </div>
+            <div id="currentServerInfo" style="margin: 1rem 0; padding: 0.75rem; background: var(--bg); border-radius: var(--radius); font-size: 0.875rem; color: var(--text-secondary); text-align: center;"></div>
             <div id="devicesList" class="devices-grid"></div>
         </div>
         
@@ -1120,13 +1639,15 @@ function getHtmlContent(): string {
                 </div>
                 
                 <div class="privacy-section" style="margin-top: 1.5rem; padding-top: 1.5rem; border-top: 1px solid var(--border-light);">
-                    <p style="font-size: 0.875rem; color: var(--text-secondary); margin-bottom: 0.5rem;">
+                    <p style="font-size: 0.875rem; color: var(--text-secondary); margin-bottom: 1rem;">
                         <strong>Disclaimer:</strong> This is an unofficial tool not affiliated with Xiaomi. Use at your own risk. 
                         The tool replicates the functionality of the Python-based Xiaomi-cloud-tokens-extractor project in a web interface.
                     </p>
-                    <p style="font-size: 0.75rem; color: var(--text-secondary); text-align: center; margin: 0;">
-                        Version 1.0.0
-                    </p>
+                    <div style="text-align: center; padding-top: 1rem; border-top: 1px solid var(--border-light);">
+                        <p style="font-size: 0.75rem; color: var(--text-muted); margin: 0; font-weight: 500; letter-spacing: 0.05em;">
+                            VERSION 1.2.0
+                        </p>
+                    </div>
                 </div>
             </div>
         </div>
@@ -1264,6 +1785,11 @@ function getHtmlContent(): string {
                     sessionLoadedFromFile = false; // Not loaded from file
                     showAlert('Login successful!', 'success');
                     updateSessionUI();
+                    // Set server selector to match login selection
+                    const serverSelector = document.getElementById('serverSelector');
+                    if (serverSelector) {
+                        serverSelector.value = credentials.server;
+                    }
                     await loadDevices();
                 } else if (result.requires2FA) {
                     // Store the client state for 2FA verification
@@ -1331,6 +1857,11 @@ function getHtmlContent(): string {
                     document.getElementById('loginForm').classList.remove('hidden');
                     showAlert('2FA verification successful!', 'success');
                     updateSessionUI();
+                    // Set server selector to match original selection
+                    const serverSelector = document.getElementById('serverSelector');
+                    if (serverSelector) {
+                        serverSelector.value = selectedServer;
+                    }
                     await loadDevices();
                 } else {
                     showAlert(\`Verification failed: \${result.error}\`, 'error');
@@ -1376,6 +1907,11 @@ function getHtmlContent(): string {
                 const result = await response.json();
                 if (result.valid) {
                     showAlert('Session is valid!', 'success');
+                    // Set server selector to loaded session's server if available
+                    const serverSelector = document.getElementById('serverSelector');
+                    if (serverSelector && currentSession.server) {
+                        serverSelector.value = currentSession.server;
+                    }
                     await loadDevices();
                 } else {
                     showAlert('Session expired, please login again', 'error');
@@ -1433,10 +1969,19 @@ function getHtmlContent(): string {
                             <div class="card-icon">🔐</div>
                             <div style="margin-left: 1rem;">
                                 <h2 style="margin-bottom: 0.25rem;">Authenticated Session</h2>
-                                <div style="display: flex; gap: 1.5rem; font-size: 0.875rem; color: var(--text-secondary);">
-                                    <span><strong>User:</strong> \${currentSession.username}</span>
-                                    <span><strong>ID:</strong> \${currentSession.userId}</span>
-                                    <span><strong>Session:</strong> \${savedAt}</span>
+                                <div style="display: flex; gap: 1.5rem; font-size: 0.8125rem; color: var(--text-secondary); font-weight: 400;">
+                                    <span style="display: flex; align-items: center; gap: 0.25rem;">
+                                        <span style="color: var(--text-muted); text-transform: uppercase; font-size: 0.6875rem; letter-spacing: 0.05em;">USER</span>
+                                        <span style="color: var(--text-secondary);">\${currentSession.username}</span>
+                                    </span>
+                                    <span style="display: flex; align-items: center; gap: 0.25rem;">
+                                        <span style="color: var(--text-muted); text-transform: uppercase; font-size: 0.6875rem; letter-spacing: 0.05em;">ID</span>
+                                        <span style="color: var(--text-secondary);">\${currentSession.userId}</span>
+                                    </span>
+                                    <span style="display: flex; align-items: center; gap: 0.25rem;">
+                                        <span style="color: var(--text-muted); text-transform: uppercase; font-size: 0.6875rem; letter-spacing: 0.05em;">SESSION</span>
+                                        <span style="color: var(--text-secondary);">\${savedAt}</span>
+                                    </span>
                                 </div>
                             </div>
                         </div>
@@ -1459,15 +2004,37 @@ function getHtmlContent(): string {
             }
         }
         
+        // Track if devices are currently loading
+        let isLoadingDevices = false;
+        
+        // All available regions
+        const allRegions = ['cn', 'de', 'us', 'ru', 'tw', 'sg', 'in', 'i2'];
+        
         // Load devices with streaming
-        async function loadDevices() {
+        async function loadDevices(autoScan = true) {
             if (!currentSession) return;
+            
+            // Prevent multiple simultaneous loads
+            if (isLoadingDevices) {
+                console.log('Already loading devices, skipping...');
+                return;
+            }
             
             const btn = document.getElementById('refreshDevicesBtn');
             const devicesList = document.getElementById('devicesList');
             const devicesSection = document.getElementById('devicesSection');
+            const serverSelector = document.getElementById('serverSelector');
             
+            // Get selected server
+            const selectedServer = serverSelector.value;
+            
+            // Update server info
+            const serverInfo = document.getElementById('currentServerInfo');
+            serverInfo.textContent = \`Loading devices from \${selectedServer.toUpperCase()} server...\`;
+            
+            isLoadingDevices = true;
             btn.disabled = true;
+            serverSelector.disabled = true;
             btn.innerHTML = '<span class="loading"></span> Loading...';
             devicesList.innerHTML = '';
             
@@ -1487,15 +2054,12 @@ function getHtmlContent(): string {
             const progressBar = progressContainer.querySelector('.progress-bar-fill');
             
             try {
-                const serverElement = document.getElementById('server');
-                const server = serverElement ? serverElement.value : (currentSession.server || 'cn');
-                
                 const response = await fetch('/api/devices-stream', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         sessionData: currentSession,
-                        server: server
+                        server: selectedServer
                     })
                 });
                 
@@ -1543,7 +2107,16 @@ function getHtmlContent(): string {
                                         if (devices.length === 0 && data.devices) {
                                             displayDevices(data.devices);
                                         }
-                                        showAlert(\`Found \${data.devices?.length || devices.length} device(s)\`, 'success');
+                                        const deviceCount = data.devices?.length || devices.length;
+                                        
+                                        // If no devices found and autoScan is enabled, try other regions
+                                        if (deviceCount === 0 && autoScan) {
+                                            progressContainer.remove();
+                                            await scanAllRegions(selectedServer);
+                                        } else {
+                                            showAlert(\`Found \${deviceCount} device(s)\`, 'success');
+                                            serverInfo.textContent = \`Showing \${deviceCount} device(s) from \${selectedServer.toUpperCase()} server\`;
+                                        }
                                         break;
                                         
                                     case 'error':
@@ -1560,10 +2133,77 @@ function getHtmlContent(): string {
             } catch (error) {
                 progressContainer.remove();
                 showAlert(\`Error loading devices: \${error.message}\`, 'error');
+                serverInfo.textContent = \`Error loading from \${selectedServer.toUpperCase()} server\`;
             } finally {
+                isLoadingDevices = false;
                 btn.disabled = false;
-                btn.textContent = 'Refresh Devices';
+                serverSelector.disabled = false;
+                btn.innerHTML = '🔄 Refresh';
             }
+        }
+        
+        // Scan all regions for devices
+        async function scanAllRegions(currentRegion) {
+            const serverInfo = document.getElementById('currentServerInfo');
+            const devicesList = document.getElementById('devicesList');
+            const serverSelector = document.getElementById('serverSelector');
+            const btn = document.getElementById('refreshDevicesBtn');
+            
+            // Get regions to scan (exclude current region)
+            const regionsToScan = allRegions.filter(r => r !== currentRegion);
+            
+            serverInfo.innerHTML = \`<strong>No devices found in \${currentRegion.toUpperCase()}. Scanning other regions...</strong>\`;
+            
+            // Disable controls during scan
+            btn.disabled = true;
+            serverSelector.disabled = true;
+            
+            let foundDevices = false;
+            
+            for (let i = 0; i < regionsToScan.length; i++) {
+                const region = regionsToScan[i];
+                serverInfo.innerHTML = \`<strong>Scanning \${region.toUpperCase()} region... (\${i + 1}/\${regionsToScan.length})</strong>\`;
+                
+                // Update the select box to show current scanning region
+                serverSelector.value = region;
+                
+                try {
+                    const response = await fetch('/api/devices', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            sessionData: currentSession,
+                            server: region
+                        })
+                    });
+                    
+                    const result = await response.json();
+                    
+                    if (result.success && result.devices && result.devices.length > 0) {
+                        // Found devices in this region!
+                        foundDevices = true;
+                        serverSelector.value = region; // Update selector to found region
+                        displayDevices(result.devices);
+                        showAlert(\`Found \${result.devices.length} device(s) in \${region.toUpperCase()} region!\`, 'success');
+                        serverInfo.textContent = \`Showing \${result.devices.length} device(s) from \${region.toUpperCase()} server\`;
+                        break;
+                    }
+                } catch (error) {
+                    console.error(\`Error scanning \${region}:\`, error);
+                }
+            }
+            
+            if (!foundDevices) {
+                serverInfo.innerHTML = '<span style="color: var(--error);">No devices found in any region. Your devices might be offline or not yet registered.</span>';
+                showAlert('No devices found in any region', 'warning');
+                // Restore original region selection
+                serverSelector.value = currentRegion;
+            }
+            
+            // Re-enable controls
+            btn.disabled = false;
+            serverSelector.disabled = false;
+            btn.innerHTML = '🔄 Refresh';
         }
         
         // Display single device (for streaming)

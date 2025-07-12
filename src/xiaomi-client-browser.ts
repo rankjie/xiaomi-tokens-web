@@ -266,7 +266,7 @@ export class XiaomiCloudConnectorBrowser {
 
   private async proxyFetch(url: string, options: any = {}): Promise<any> {
     // When running on server (Node.js), make direct request
-    if (typeof globalThis.window === "undefined") {
+    if (typeof (globalThis as any).window === "undefined") {
       const response = await fetch(url, {
         method: options.method || "GET",
         headers: options.headers || {},
@@ -320,20 +320,20 @@ export class XiaomiCloudConnectorBrowser {
       }),
     });
 
-    const result = await response.json();
+    const result = await response.json() as any;
     if (result.error) {
       throw new Error(result.error);
     }
 
     // Parse cookies from headers
-    if (result.headers["set-cookie"]) {
+    if (result.headers && result.headers["set-cookie"]) {
       this.parseCookies(result.headers["set-cookie"]);
     }
 
     return {
       ok: result.status >= 200 && result.status < 300,
       status: result.status,
-      headers: result.headers,
+      headers: result.headers || {},
       text: async () => result.body,
       json: async () => {
         let jsonStr = result.body;
@@ -346,19 +346,31 @@ export class XiaomiCloudConnectorBrowser {
     };
   }
 
+  private setupInitialCookies(): void {
+    // Set up cookies like Python does in login() method
+    this.cookies.sdkVersion = "accountsdk-18.8.15";
+    this.cookies.deviceId = this.deviceId;
+  }
+
   async loginStep1(): Promise<boolean> {
+    // Set up initial cookies before any login steps
+    this.setupInitialCookies();
+    
     const url = "https://account.xiaomi.com/pass/serviceLogin?sid=xiaomiio&_json=true";
     try {
       const response = await this.proxyFetch(url, {
         headers: {
           "User-Agent": this.agent,
+          "Content-Type": "application/x-www-form-urlencoded",
           Cookie: `userId=${this.username}`,
         },
       });
 
       const data = await response.json();
+      console.log("[loginStep1] Response data keys:", Object.keys(data));
       if (data && data._sign) {
         this.sign = data._sign;
+        console.log("[loginStep1] Got sign:", this.sign);
         return true;
       }
     } catch (error) {
@@ -371,17 +383,27 @@ export class XiaomiCloudConnectorBrowser {
     const url = "https://account.xiaomi.com/pass/serviceLoginAuth2";
     const hash = await this.hashPassword(this.password);
 
+    console.log("[loginStep2] Starting with state:", {
+      sign: this.sign ? 'present' : 'missing',
+      cookies: Object.keys(this.cookies),
+      username: this.username,
+      deviceId: this.deviceId
+    });
+
     const fields = {
-      _json: "true",
-      qs: "%3Fsid%3Dxiaomiio%26_json%3Dtrue",
       sid: "xiaomiio",
-      _sign: this.sign,
       hash: hash,
       callback: "https://sts.api.io.mi.com/sts",
+      qs: "%3Fsid%3Dxiaomiio%26_json%3Dtrue",
       user: this.username,
-      deviceId: this.deviceId,
-      serviceParam: '{"checkSafePhone":false}',
+      _sign: this.sign || "",
+      _json: "true"
     };
+    
+    console.log("[loginStep2] Request fields:", {
+      ...fields,
+      hash: fields.hash ? 'present' : 'empty'
+    });
 
     try {
       const response = await this.proxyFetch(url, {
@@ -389,6 +411,7 @@ export class XiaomiCloudConnectorBrowser {
         headers: {
           "User-Agent": this.agent,
           "Content-Type": "application/x-www-form-urlencoded",
+          Cookie: this.buildCookieString(),
         },
         body: new URLSearchParams(fields).toString(),
       });
@@ -401,17 +424,20 @@ export class XiaomiCloudConnectorBrowser {
       }
 
       const data = await response.json();
-      // console.log("Login step 2 response:", data);
+      console.log("[loginStep2] Response:", {
+        code: data.code,
+        securityStatus: data.securityStatus,
+        hasNotificationUrl: !!data.notificationUrl,
+        hasLocation: !!data.location,
+        hasSSecurity: !!data.ssecurity,
+        hasCookies: Object.keys(this.cookies)
+      });
 
-      if (data.code === 0) {
-        // Check if additional verification is required
-        if (data.securityStatus === 16 && data.notificationUrl) {
-          // Security verification required (similar to 2FA)
-          this.verifyUrl = data.notificationUrl;
-          return { success: false, requires2FA: true, verifyUrl: this.verifyUrl };
-        }
-
-        // Normal successful login
+      // Check if ssecurity is present and valid (like Python line 140)
+      const hasValidSSecurity = data.ssecurity && data.ssecurity.length > 4;
+      
+      if (hasValidSSecurity) {
+        // Extract all values like Python does (lines 142-147)
         this.ssecurity = data.ssecurity;
         this.userId = data.userId;
         this.cUserId = data.cUserId;
@@ -419,23 +445,23 @@ export class XiaomiCloudConnectorBrowser {
         this.location = data.location;
         this.code = data.code;
 
-        // console.log("Login step 2 success:", {
-        //   userId: this.userId,
-        //   location: this.location,
-        //   cookies: this.cookies
-        // });
-
-        // Only return success if we have required data
-        if (this.location) {
-          return { success: true };
-        } else {
-          return { success: false, error: "Missing location URL" };
-        }
-      } else if (data.code === 20003) {
-        // 2FA required
-        this.verifyUrl = data.notificationUrl;
-        return { success: false, requires2FA: true, verifyUrl: this.verifyUrl };
+        console.log("[loginStep2] Login successful, extracted data:", {
+          userId: this.userId,
+          hasLocation: !!this.location,
+          hasSSecurity: !!this.ssecurity,
+          ssecurity: this.ssecurity,
+          cookies: Object.keys(this.cookies)
+        });
+        
+        return { success: true };
       } else {
+        // Check for 2FA requirement like Python (line 149)
+        if (data.notificationUrl) {
+          this.verifyUrl = data.notificationUrl;
+          return { success: false, requires2FA: true, verifyUrl: this.verifyUrl || undefined };
+        }
+        
+        console.log("[loginStep2] Login failed - no ssecurity or notificationUrl");
         return { success: false, error: data.desc || "Login failed" };
       }
     } catch (error: any) {
@@ -450,12 +476,13 @@ export class XiaomiCloudConnectorBrowser {
       return false;
     }
 
-    // console.log("Checking identity options from:", this.verifyUrl);
+    console.log("[checkIdentityOptions] Checking from URL:", this.verifyUrl);
+    console.log("[checkIdentityOptions] Current cookies before:", Object.keys(this.cookies));
 
     try {
       // Replace 'identity/authStart' with 'identity/list' as per Python implementation
       const listUrl = this.verifyUrl.replace("identity/authStart", "identity/list");
-      // console.log("Fetching identity list from:", listUrl);
+      console.log("[checkIdentityOptions] Fetching identity list from:", listUrl);
 
       const response = await this.proxyFetch(listUrl, {
         headers: {
@@ -465,12 +492,13 @@ export class XiaomiCloudConnectorBrowser {
       });
 
       const text = await response.text();
-      // console.log("Identity list response:", text);
+      console.log("[checkIdentityOptions] Response preview:", text.substring(0, 200));
+      console.log("[checkIdentityOptions] Cookies after request:", Object.keys(this.cookies));
 
       // Extract identity_session cookie
       if (this.cookies.identity_session) {
         this.identitySession = this.cookies.identity_session;
-        // console.log("Got identity_session:", this.identitySession);
+        console.log("[checkIdentityOptions] Got identity_session:", this.identitySession);
       }
 
       try {
@@ -501,7 +529,13 @@ export class XiaomiCloudConnectorBrowser {
   }
 
   async verify2FATicket(ticket: string): Promise<{ success: boolean; error?: string }> {
-    // console.log("verify2FATicket called with ticket:", ticket);
+    console.log("[verify2FATicket] Called with ticket:", ticket);
+    console.log("[verify2FATicket] Initial state:", {
+      identityOptions: this.identityOptions,
+      identitySession: this.identitySession,
+      cookies: Object.keys(this.cookies),
+      sign: this.sign ? 'present' : 'missing'
+    });
 
     // First, check identity options if we haven't already
     if (this.identityOptions.length === 0) {
@@ -549,69 +583,92 @@ export class XiaomiCloudConnectorBrowser {
         // console.log(`Verification response data (flag ${flag}):`, result);
 
         if (result && result.code === 0) {
-          // Success! Follow the location if provided
+          console.log(`[verify2FATicket] Success with flag ${flag}!`);
+          
+          // Follow location if provided (as in Python implementation)
           if (result.location) {
-            // console.log("Following redirect to:", result.location);
+            console.log("[verify2FATicket] Following redirect chain starting from:", result.location);
+            
+            let currentUrl = result.location;
+            let redirectCount = 0;
+            const maxRedirects = 5;
+            
             try {
-              // Follow the redirect chain
-              let currentUrl = result.location;
-              let redirectCount = 0;
-              const maxRedirects = 5;
-
+              // Follow redirect chain like Python's session.get() does
               while (redirectCount < maxRedirects) {
                 const response = await this.proxyFetch(currentUrl, {
                   headers: {
                     "User-Agent": this.agent,
-                    Cookie:
-                      this.buildCookieString() +
-                      (this.identitySession ? `; identity_session=${this.identitySession}` : ""),
+                    Cookie: this.buildCookieString(),
                   },
                 });
-
-                // console.log(`Redirect ${redirectCount + 1} status:`, response.status);
-
+                
+                // Parse cookies from each response
+                if (response.headers?.["set-cookie"]) {
+                  this.parseCookies(response.headers["set-cookie"]);
+                }
+                
+                console.log(`[verify2FATicket] Redirect ${redirectCount + 1} status:`, response.status);
+                console.log(`[verify2FATicket] Redirect ${redirectCount + 1} cookies:`, Object.keys(this.cookies));
+                
                 // Check if there's another redirect
                 if (response.status >= 300 && response.status < 400 && response.headers?.location) {
-                  currentUrl = response.headers.location;
-                  // console.log(`Following next redirect to:`, currentUrl);
+                  // Handle relative URLs
+                  const redirectLocation = response.headers.location;
+                  if (redirectLocation.startsWith('http')) {
+                    currentUrl = redirectLocation;
+                  } else {
+                    // Relative URL - construct full URL
+                    const baseUrl = new URL(currentUrl);
+                    currentUrl = new URL(redirectLocation, `${baseUrl.protocol}//${baseUrl.host}`).toString();
+                  }
+                  console.log(`[verify2FATicket] Following next redirect to:`, currentUrl);
                   redirectCount++;
-                  continue;
-                }
-
-                // Try to extract data from the response
-                try {
-                  const text = await response.text();
-                  // console.log(`Redirect response preview:`, text.substring(0, 200));
-
-                  // Check if this response contains session data
-                  if (text.includes("ssecurity") || text.includes("serviceToken")) {
-                    const jsonMatch = text.match(/\{.*?\}/);
-                    if (jsonMatch) {
-                      const data = JSON.parse(jsonMatch[0]);
-                      if (data.ssecurity) this.ssecurity = data.ssecurity;
-                      if (data.userId) this.userId = data.userId;
-                      if (data.serviceToken) this.serviceToken = data.serviceToken;
-                      if (data.location) this.location = data.location;
+                } else {
+                  // No more redirects, we're done
+                  console.log("[verify2FATicket] Redirect chain complete");
+                  console.log("[verify2FATicket] Final cookies:", Object.keys(this.cookies));
+                  
+                  // Extract important values from final URL if it's the STS callback
+                  if (currentUrl.includes('sts.api.io.mi.com/sts')) {
+                    const urlObj = new URL(currentUrl);
+                    const nonce = urlObj.searchParams.get('nonce');
+                    if (nonce) {
+                      console.log("[verify2FATicket] Found nonce in STS URL:", nonce);
+                      // Note: This nonce is NOT the ssecurity - ssecurity comes from loginStep2
                     }
                   }
-                } catch (e) {
-                  // console.log("Error parsing redirect response:", e);
+                  break;
                 }
-
-                break;
+              }
+              
+              if (redirectCount >= maxRedirects) {
+                console.error("[verify2FATicket] Too many redirects");
               }
             } catch (e) {
-              console.error("Redirect follow error:", e);
+              console.log("[verify2FATicket] Redirect follow error:", e);
             }
           }
-
-          // Extract session data from result
-          if (result.ssecurity) this.ssecurity = result.ssecurity;
-          if (result.userId) this.userId = result.userId;
-          if (result.cUserId) this.cUserId = result.cUserId;
-          if (result.passToken) this.passToken = result.passToken;
-          if (result.location) this.location = result.location;
-
+          
+          // Clear identity session as per Python: self._identity_session = None
+          this.identitySession = null;
+          
+          // Extract important values from cookies after redirect chain
+          if (this.cookies.userId) {
+            this.userId = this.cookies.userId;
+            console.log("[verify2FATicket] Extracted userId from cookies:", this.userId);
+          }
+          if (this.cookies.serviceToken) {
+            this.serviceToken = this.cookies.serviceToken;
+            console.log("[verify2FATicket] Extracted serviceToken from cookies");
+          }
+          if (this.cookies.passToken) {
+            this.passToken = this.cookies.passToken;
+          }
+          if (this.cookies.cUserId) {
+            this.cUserId = this.cookies.cUserId;
+          }
+          
           return { success: true };
         }
       } catch (error) {
@@ -629,49 +686,37 @@ export class XiaomiCloudConnectorBrowser {
     }
 
     try {
-      let currentUrl = this.location;
-      let attempts = 0;
-      const maxRedirects = 5;
+      // Match Python exactly - just make a GET request
+      const response = await this.proxyFetch(this.location, {
+        headers: {
+          "User-Agent": this.agent,
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+      });
 
-      // Follow redirects manually
-      while (attempts < maxRedirects) {
-        const response = await this.proxyFetch(currentUrl, {
-          headers: {
-            "User-Agent": this.agent,
-            Cookie: this.buildCookieString(),
-          },
-        });
-
-        // Check for redirect
-        if (response.status >= 300 && response.status < 400) {
-          const redirectUrl = response.headers?.location;
-          if (redirectUrl) {
-            currentUrl = redirectUrl;
-            attempts++;
-            continue;
-          }
+      // Python checks status_code == 200
+      if (response.ok) {
+        // Extract serviceToken from cookies
+        if (this.cookies.serviceToken) {
+          this.serviceToken = this.cookies.serviceToken;
+          return true;
+        } else {
+          console.error("Login step 3: No serviceToken in cookies");
+          return false;
         }
-
-        break;
-      }
-
-      // console.log("Login step 3 cookies:", this.cookies);
-
-      // Extract serviceToken from cookies
-      if (this.cookies.serviceToken) {
-        this.serviceToken = this.cookies.serviceToken;
-        return true;
       } else {
-        console.error("Login step 3: No serviceToken in cookies");
+        console.error("Login step 3: HTTP error:", response.status);
+        return false;
       }
     } catch (error) {
       console.error("Login step 3 failed:", error);
+      return false;
     }
-    return false;
   }
 
   private parseCookies(cookieString: string | string[]): void {
     const cookieStrings = Array.isArray(cookieString) ? cookieString : [cookieString];
+    const newCookies: Record<string, string> = {};
 
     cookieStrings.forEach((cookieStr) => {
       // Handle comma-separated cookies from proxy
@@ -686,10 +731,29 @@ export class XiaomiCloudConnectorBrowser {
         const [key, value] = keyValue.trim().split("=");
 
         if (key && value) {
+          // Special handling for deviceId - don't override our original deviceId with wb_* values
+          if (key === 'deviceId' && value.startsWith('wb_') && this.deviceId && !this.deviceId.startsWith('wb_')) {
+            console.log(`[parseCookies] Ignoring wb_* deviceId (${value}), keeping original: ${this.deviceId}`);
+            return;
+          }
+          
+          // Don't set cookies with value 'EXPIRED'
+          if (value === 'EXPIRED') {
+            console.log(`[parseCookies] Ignoring expired cookie: ${key}`);
+            delete this.cookies[key];
+            return;
+          }
+          
           this.cookies[key] = value;
+          newCookies[key] = value;
         }
       });
     });
+    
+    if (Object.keys(newCookies).length > 0) {
+      console.log("[parseCookies] New cookies set:", Object.keys(newCookies));
+      console.log("[parseCookies] Cookie values:", newCookies);
+    }
   }
 
   private generateNonce(): string {
@@ -725,10 +789,20 @@ export class XiaomiCloudConnectorBrowser {
       throw new Error("Missing ssecurity");
     }
 
+    console.log("[signedNonce] Signing with ssecurity:", this.ssecurity);
+    console.log("[signedNonce] Nonce to sign:", nonce);
+
     try {
       // Python: hashlib.sha256(base64.b64decode(self._ssecurity) + base64.b64decode(nonce))
       // Decode both ssecurity and nonce from base64
-      const ssecurityBytes = Uint8Array.from(atob(this.ssecurity), (c) => c.charCodeAt(0));
+      let ssecurityBytes: Uint8Array;
+      try {
+        ssecurityBytes = Uint8Array.from(atob(this.ssecurity), (c) => c.charCodeAt(0));
+      } catch (e) {
+        console.error("[signedNonce] Failed to decode ssecurity as base64, might not be encoded:", e);
+        throw new Error("Invalid ssecurity encoding");
+      }
+      
       const nonceBytes = Uint8Array.from(atob(nonce), (c) => c.charCodeAt(0));
 
       // Concatenate the byte arrays
@@ -1036,6 +1110,13 @@ export class XiaomiCloudConnectorBrowser {
   }
 
   private async executeApiCallEncrypted(url: string, params: Record<string, any>): Promise<any> {
+    console.log("[executeApiCallEncrypted] Called with URL:", url);
+    console.log("[executeApiCallEncrypted] Current auth state:", {
+      ssecurity: this.ssecurity,
+      userId: this.userId,
+      serviceToken: this.serviceToken ? 'present' : 'missing'
+    });
+    
     const nonce = this.generateNonce();
     const signedNonce = await this.signedNonce(nonce);
 
@@ -1113,15 +1194,29 @@ export class XiaomiCloudConnectorBrowser {
   private buildCookieString(): string {
     const cookieEntries = [];
 
-    // Add userId if available
-    if (this.userId) {
-      cookieEntries.push(`userId=${this.userId}`);
+    // Add userId if available (from either this.userId or cookies)
+    const userId = this.userId || this.cookies.userId;
+    if (userId && userId !== 'EXPIRED') {
+      cookieEntries.push(`userId=${userId}`);
     }
 
     // Add serviceToken if available
-    if (this.serviceToken) {
-      cookieEntries.push(`serviceToken=${this.serviceToken}`);
-      cookieEntries.push(`yetAnotherServiceToken=${this.serviceToken}`);
+    if (this.serviceToken || this.cookies.serviceToken) {
+      const token = this.serviceToken || this.cookies.serviceToken;
+      cookieEntries.push(`serviceToken=${token}`);
+      cookieEntries.push(`yetAnotherServiceToken=${token}`);
+    }
+    
+    // Add passToken if available
+    const passToken = this.passToken || this.cookies.passToken;
+    if (passToken && passToken !== 'EXPIRED') {
+      cookieEntries.push(`passToken=${passToken}`);
+    }
+    
+    // Add cUserId if available
+    const cUserId = this.cUserId || this.cookies.cUserId;
+    if (cUserId && cUserId !== 'EXPIRED') {
+      cookieEntries.push(`cUserId=${cUserId}`);
     }
 
     // Add additional cookies as per Python implementation
@@ -1133,13 +1228,15 @@ export class XiaomiCloudConnectorBrowser {
     cookieEntries.push("sdkVersion=accountsdk-18.8.15");
     cookieEntries.push(`deviceId=${this.deviceId}`);
 
-    // Add any other cookies
+    // Add any other cookies (but skip EXPIRED ones)
     Object.entries(this.cookies).forEach(([key, value]) => {
       if (
         ![
           "userId",
           "serviceToken",
           "yetAnotherServiceToken",
+          "passToken",
+          "cUserId",
           "locale",
           "timezone",
           "is_daylight",
@@ -1147,13 +1244,16 @@ export class XiaomiCloudConnectorBrowser {
           "channel",
           "sdkVersion",
           "deviceId",
-        ].includes(key)
+        ].includes(key) &&
+        value !== "EXPIRED"
       ) {
         cookieEntries.push(`${key}=${value}`);
       }
     });
 
-    return cookieEntries.join("; ");
+    const cookieString = cookieEntries.join("; ");
+    console.log("[buildCookieString] Final cookie string keys:", cookieEntries.map(c => c.split('=')[0]));
+    return cookieString;
   }
 
   getSessionData(): SessionData {
