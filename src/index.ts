@@ -94,7 +94,13 @@ app.post('/api/proxy', async (c) => {
 
 // Serve the HTML interface
 app.get('/', (c) => {
-  return c.html(getHtmlContent());
+  const lang = c.req.query('lang') || 'en';
+  return c.html(getHtmlContent(lang));
+});
+
+// Language-specific routes
+app.get('/zh', (c) => {
+  return c.html(getHtmlContent('zh'));
 });
 
 // Serve favicon
@@ -389,13 +395,232 @@ app.post('/api/validate-session', async (c) => {
   }
 });
 
-function getHtmlContent(): string {
+// Translations
+const translations: any = {
+  en: {
+    title: 'Xiaomi Cloud Tokens Extractor',
+    subtitle: 'Extract device tokens and keys from your Xiaomi account',
+    authentication: 'Authentication',
+    loginTab: 'Login with Credentials',
+    sessionTab: 'Use Saved Session',
+    username: 'Username',
+    usernamePlaceholder: 'Email, phone number, or Xiaomi ID',
+    usernameHint: 'Accepts: Email address, phone number (mostly CN accounts), or Xiaomi account ID',
+    password: 'Password',
+    serverRegion: 'Server Region',
+    serverHint1: 'Choose the region where you created your Xiaomi account or where your devices were purchased',
+    serverHint2: 'You can switch to other regions after login without re-authenticating',
+    login: 'Login',
+    dropZoneTitle: 'Drop session file here',
+    dropZoneSubtitle: 'or click to browse',
+    chooseFile: 'Choose File',
+    twoFactorTitle: 'Two-Factor Authentication',
+    twoFactorSteps: 'Please follow these steps:',
+    twoFactorStep1: 'Open this URL in your browser:',
+    twoFactorStep2: 'Choose your verification method (SMS or Email)',
+    twoFactorStep3: "You'll receive a 6-digit verification code",
+    twoFactorStep4: 'DO NOT enter the code on Xiaomi\'s website!',
+    twoFactorStep5: 'Close the browser and enter the code below:',
+    verificationCode: 'Verification Code',
+    verificationPlaceholder: 'Enter 6 digits',
+    verify: 'Verify',
+    devices: 'Devices',
+    authenticatedSession: 'Authenticated Session',
+    user: 'USER',
+    id: 'ID',
+    session: 'SESSION',
+    saveSession: 'Save Session',
+    changeAccount: 'Change Account',
+    refresh: 'Refresh',
+    loadingDevices: 'Loading devices from',
+    noDevicesFound: 'No devices found in',
+    scanningRegion: 'Scanning',
+    scanningProgress: 'region...',
+    foundDevices: 'Found',
+    devicesIn: 'device(s) in',
+    showing: 'Showing',
+    devicesFrom: 'device(s) from',
+    online: 'Online',
+    offline: 'Offline',
+    clickToCopy: 'Click to copy',
+    privacyTitle: 'Privacy & Security Disclosure',
+    privacyWhat: 'What This Tool Does',
+    privacyWhatDesc: 'This tool extracts device tokens and authentication keys from your Xiaomi account. These tokens are used to locally control your Xiaomi smart home devices without going through Xiaomi\'s cloud servers.',
+    privacyHow: 'How It Works',
+    privacyHowItems: [
+      'Authenticates with Xiaomi\'s servers using your credentials',
+      'Retrieves a list of all devices linked to your account',
+      'Extracts device tokens and BLE keys for local control'
+    ],
+    privacyData: 'Data Handling',
+    privacyDataItems: [
+      '<strong>No storage:</strong> Your credentials are never stored on the server',
+      '<strong>Session files:</strong> Saved locally on your device only',
+      '<strong>Direct communication:</strong> All API calls go directly to Xiaomi servers',
+      '<strong>Open source:</strong> Code is fully auditable on GitHub'
+    ],
+    privacySecurity: 'Security Recommendations',
+    privacySecurityItems: [
+      'Use HTTPS when deploying this tool',
+      'Keep session files secure - they contain authentication tokens',
+      'Enable 2FA on your Xiaomi account',
+      'Consider using app-specific passwords if available'
+    ],
+    disclaimer: 'Disclaimer:',
+    disclaimerText: 'This is an unofficial tool not affiliated with Xiaomi. Use at your own risk. The tool replicates the functionality of the Python-based Xiaomi-cloud-tokens-extractor project in a web interface.',
+    version: 'VERSION',
+    githubLink: 'GitHub',
+    pythonLink: 'Original Python Version',
+    model: 'Model',
+    did: 'DID',
+    token: 'Token',
+    ip: 'IP',
+    mac: 'MAC',
+    bleKey: 'BLE Key',
+    wifi: 'WiFi',
+    unknownDevice: 'Unknown Device',
+    loginSuccessful: 'Login successful!',
+    verificationRequired: '2FA verification required',
+    verificationSuccessful: '2FA verification successful!',
+    sessionLoaded: 'Session loaded, validating...',
+    sessionValid: 'Session is valid!',
+    sessionExpired: 'Session expired, please login again',
+    invalidSessionFile: 'Invalid session file',
+    sessionSaved: 'Session saved successfully',
+    failedToCopy: 'Failed to copy to clipboard',
+    error: 'Error',
+    warning: 'Warning',
+    info: 'Info',
+    success: 'Success',
+    noDevicesInAnyRegion: 'No devices found in any region. Your devices might be offline or not yet registered.',
+    searchingDevices: 'Searching for devices...',
+    // Region names
+    regionChina: '🇨🇳 China (cn) - Mainland China',
+    regionGermany: '🇩🇪 Germany (de) - Europe',
+    regionUS: '🇺🇸 United States (us) - Americas',
+    regionRussia: '🇷🇺 Russia (ru) - Russia/CIS',
+    regionTaiwan: '🇹🇼 Taiwan (tw) - Taiwan',
+    regionSingapore: '🇸🇬 Singapore (sg) - Southeast Asia',
+    regionIndia: '🇮🇳 India (in) - India',
+    regionInternational: '🌍 International (i2) - Other regions'
+  },
+  zh: {
+    title: '小米云令牌提取器',
+    subtitle: '从您的小米账户提取设备令牌和密钥',
+    authentication: '身份验证',
+    loginTab: '使用账号密码登录',
+    sessionTab: '使用已保存的会话',
+    username: '用户名',
+    usernamePlaceholder: '邮箱、手机号或小米ID',
+    usernameHint: '支持：邮箱地址、手机号（主要是国内账号）或小米账号ID',
+    password: '密码',
+    serverRegion: '服务器区域',
+    serverHint1: '选择您创建小米账户或购买设备的区域',
+    serverHint2: '登录后可以切换到其他区域而无需重新验证',
+    login: '登录',
+    dropZoneTitle: '将会话文件拖放到此处',
+    dropZoneSubtitle: '或点击浏览',
+    chooseFile: '选择文件',
+    twoFactorTitle: '两步验证',
+    twoFactorSteps: '请按照以下步骤操作：',
+    twoFactorStep1: '在浏览器中打开此链接：',
+    twoFactorStep2: '选择您的验证方式（短信或邮箱）',
+    twoFactorStep3: '您将收到6位验证码',
+    twoFactorStep4: '请勿在小米官网输入验证码！',
+    twoFactorStep5: '关闭浏览器并在下方输入验证码：',
+    verificationCode: '验证码',
+    verificationPlaceholder: '输入6位数字',
+    verify: '验证',
+    devices: '设备',
+    authenticatedSession: '已认证会话',
+    user: '用户',
+    id: 'ID',
+    session: '会话',
+    saveSession: '保存会话',
+    changeAccount: '更换账号',
+    refresh: '刷新',
+    loadingDevices: '正在从以下服务器加载设备',
+    noDevicesFound: '在以下区域未找到设备',
+    scanningRegion: '正在扫描',
+    scanningProgress: '区域...',
+    foundDevices: '在',
+    devicesIn: '找到',
+    showing: '显示来自',
+    devicesFrom: '服务器的',
+    online: '在线',
+    offline: '离线',
+    clickToCopy: '点击复制',
+    privacyTitle: '隐私与安全声明',
+    privacyWhat: '工具功能',
+    privacyWhatDesc: '此工具从您的小米账户提取设备令牌和认证密钥。这些令牌用于在本地控制您的小米智能家居设备，无需通过小米云服务器。',
+    privacyHow: '工作原理',
+    privacyHowItems: [
+      '使用您的凭据向小米服务器进行身份验证',
+      '检索链接到您账户的所有设备列表',
+      '提取用于本地控制的设备令牌和BLE密钥'
+    ],
+    privacyData: '数据处理',
+    privacyDataItems: [
+      '<strong>不存储：</strong>您的凭据永远不会存储在服务器上',
+      '<strong>会话文件：</strong>仅保存在您的设备本地',
+      '<strong>直接通信：</strong>所有API调用直接发送到小米服务器',
+      '<strong>开源代码：</strong>代码在GitHub上完全可审计'
+    ],
+    privacySecurity: '安全建议',
+    privacySecurityItems: [
+      '部署此工具时使用HTTPS',
+      '妥善保管会话文件 - 它们包含认证令牌',
+      '在您的小米账户上启用两步验证',
+      '如果可用，考虑使用应用专用密码'
+    ],
+    disclaimer: '免责声明：',
+    disclaimerText: '这是一个非官方工具，与小米公司无关。使用风险自负。该工具在Web界面中复制了基于Python的Xiaomi-cloud-tokens-extractor项目的功能。',
+    version: '版本',
+    githubLink: 'GitHub',
+    pythonLink: '原始Python版本',
+    model: '型号',
+    did: 'DID',
+    token: '令牌',
+    ip: 'IP',
+    mac: 'MAC',
+    bleKey: 'BLE密钥',
+    wifi: 'WiFi',
+    unknownDevice: '未知设备',
+    loginSuccessful: '登录成功！',
+    verificationRequired: '需要两步验证',
+    verificationSuccessful: '两步验证成功！',
+    sessionLoaded: '会话已加载，正在验证...',
+    sessionValid: '会话有效！',
+    sessionExpired: '会话已过期，请重新登录',
+    invalidSessionFile: '无效的会话文件',
+    sessionSaved: '会话保存成功',
+    failedToCopy: '复制到剪贴板失败',
+    error: '错误',
+    warning: '警告',
+    info: '信息',
+    success: '成功',
+    noDevicesInAnyRegion: '在任何区域都未找到设备。您的设备可能离线或尚未注册。',
+    searchingDevices: '正在搜索设备...',
+    // Region names
+    regionChina: '🇨🇳 中国 (cn) - 中国大陆',
+    regionGermany: '🇩🇪 德国 (de) - 欧洲',
+    regionUS: '🇺🇸 美国 (us) - 美洲',
+    regionRussia: '🇷🇺 俄罗斯 (ru) - 俄罗斯/独联体',
+    regionTaiwan: '🇹🇼 台湾 (tw) - 台湾地区',
+    regionSingapore: '🇸🇬 新加坡 (sg) - 东南亚',
+    regionIndia: '🇮🇳 印度 (in) - 印度',
+    regionInternational: '🌍 国际 (i2) - 其他地区'
+  }
+};
+
+function getHtmlContent(lang: string = 'en'): string {
+  const t = translations[lang] || translations.en;
   return `<!DOCTYPE html>
-<html lang="en">
+<html lang="${lang}">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Xiaomi Cloud Tokens Extractor</title>
+    <title>${t.title}</title>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg">
     <link rel="alternate icon" href="/favicon.ico">
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -1496,63 +1721,68 @@ function getHtmlContent(): string {
 <body>
     <div class="container">
         <div class="header">
-            <h1>Xiaomi Cloud Tokens Extractor</h1>
-            <p class="subtitle">Extract device tokens and keys from your Xiaomi account</p>
+            <div style="position: absolute; top: 1rem; right: 1rem;">
+                <button onclick="switchLanguage()" style="background: transparent; border: 1px solid var(--border); color: var(--text-secondary); padding: 0.5rem 1rem; font-size: 0.875rem;">
+                    ${lang === 'en' ? '中文' : 'English'}
+                </button>
+            </div>
+            <h1>${t.title}</h1>
+            <p class="subtitle">${t.subtitle}</p>
         </div>
         
         <div class="card">
             <div class="card-header">
                 <div class="card-icon">🔐</div>
-                <h2>Authentication</h2>
+                <h2>${t.authentication}</h2>
             </div>
             
             <div class="auth-tabs">
-                <button class="auth-tab active" onclick="switchAuthTab('login')">Login with Credentials</button>
-                <button class="auth-tab" onclick="switchAuthTab('session')">Use Saved Session</button>
+                <button class="auth-tab active" onclick="switchAuthTab('login')">${t.loginTab}</button>
+                <button class="auth-tab" onclick="switchAuthTab('session')">${t.sessionTab}</button>
             </div>
             
             <div id="loginTab" class="auth-content active">
                 <form id="loginForm">
                     <div class="form-group">
-                        <label for="username">Username</label>
-                        <input type="text" id="username" name="username" required placeholder="Email, phone number, or Xiaomi ID">
+                        <label for="username">${t.username}</label>
+                        <input type="text" id="username" name="username" required placeholder="${t.usernamePlaceholder}">
                         <small style="color: var(--text-secondary); font-size: 0.75rem; margin-top: 0.25rem; display: block;">
-                            Accepts: Email address, phone number (mostly CN accounts), or Xiaomi account ID
+                            ${t.usernameHint}
                         </small>
                     </div>
                     <div class="form-group">
-                        <label for="password">Password</label>
+                        <label for="password">${t.password}</label>
                         <input type="password" id="password" name="password" required>
                     </div>
                     <div class="form-group">
-                        <label for="server">Server Region</label>
-                        <select id="server" name="server" title="Select the region where you registered your Xiaomi account">
-                            <option value="cn">🇨🇳 China (cn) - Mainland China</option>
-                            <option value="de">🇩🇪 Germany (de) - Europe</option>
-                            <option value="us">🇺🇸 United States (us) - Americas</option>
-                            <option value="ru">🇷🇺 Russia (ru) - Russia/CIS</option>
-                            <option value="tw">🇹🇼 Taiwan (tw) - Taiwan</option>
-                            <option value="sg">🇸🇬 Singapore (sg) - Southeast Asia</option>
-                            <option value="in">🇮🇳 India (in) - India</option>
-                            <option value="i2">🌍 International (i2) - Other regions</option>
+                        <label for="server">${t.serverRegion}</label>
+                        <select id="server" name="server" title="${t.serverHint1}">
+                            <option value="cn">${t.regionChina}</option>
+                            <option value="de">${t.regionGermany}</option>
+                            <option value="us">${t.regionUS}</option>
+                            <option value="ru">${t.regionRussia}</option>
+                            <option value="tw">${t.regionTaiwan}</option>
+                            <option value="sg">${t.regionSingapore}</option>
+                            <option value="in">${t.regionIndia}</option>
+                            <option value="i2">${t.regionInternational}</option>
                         </select>
                         <small style="color: var(--text-secondary); font-size: 0.75rem; margin-top: 0.25rem; display: block;">
-                            💡 Choose the region where you created your Xiaomi account or where your devices were purchased<br>
-                            You can switch to other regions after login without re-authenticating
+                            💡 ${t.serverHint1}<br>
+                            ${t.serverHint2}
                         </small>
                     </div>
-                    <button type="submit" id="loginBtn">Login</button>
+                    <button type="submit" id="loginBtn">${t.login}</button>
                 </form>
             </div>
             
             <div id="sessionTab" class="auth-content">
                 <div id="dropZone" class="drop-zone">
                     <div class="drop-zone-icon">📁</div>
-                    <h3 style="margin-bottom: 0.5rem;">Drop session file here</h3>
-                    <p style="color: var(--text-secondary); margin-bottom: 1rem;">or click to browse</p>
+                    <h3 style="margin-bottom: 0.5rem;">${t.dropZoneTitle}</h3>
+                    <p style="color: var(--text-secondary); margin-bottom: 1rem;">${t.dropZoneSubtitle}</p>
                     <input type="file" id="loadSession" accept=".json" style="display: none;">
                     <button class="button-secondary" onclick="document.getElementById('loadSession').click()">
-                        Choose File
+                        ${t.chooseFile}
                     </button>
                 </div>
                 <div id="sessionInfo" style="margin-top: 1rem;"></div>
@@ -1563,9 +1793,9 @@ function getHtmlContent(): string {
         <div id="verifySection" class="card hidden">
             <div class="card-header">
                 <div class="card-icon">🔐</div>
-                <h2>Two-Factor Authentication</h2>
+                <h2>${t.twoFactorTitle}</h2>
             </div>
-            <p>Please follow these steps:</p>
+            <p>${t.twoFactorSteps}</p>
             <ol style="line-height: 2; margin: 1rem 0;">
                 <li>Open this URL in your browser:
                     <div class="verify-url" style="margin: 0.5rem 0;">
@@ -1681,6 +1911,21 @@ function getHtmlContent(): string {
     </div>
     
     <script>
+        // Translations
+        const translations = ${JSON.stringify(translations)};
+        let currentLang = '${lang}';
+        
+        // Translation function
+        function t(key) {
+            return translations[currentLang]?.[key] || translations.en[key] || key;
+        }
+        
+        // Language switching
+        function switchLanguage() {
+            const newLang = currentLang === 'en' ? 'zh' : 'en';
+            window.location.href = newLang === 'zh' ? '/zh' : '/';
+        }
+        
         let currentSession = null;
         let tempClientState = null; // Store client state for stateless 2FA
         let selectedServer = 'cn'; // Store selected server
@@ -1810,7 +2055,7 @@ function getHtmlContent(): string {
                     currentSession = result.session;
                     currentSession.server = credentials.server; // Store server selection
                     sessionLoadedFromFile = false; // Not loaded from file
-                    showAlert('Login successful!', 'success');
+                    showAlert(t('loginSuccessful'), 'success');
                     updateSessionUI();
                     // Set server selector to match login selection
                     const serverSelector = document.getElementById('serverSelector');
@@ -1840,7 +2085,7 @@ function getHtmlContent(): string {
                     // Focus on the input after a short delay
                     setTimeout(() => verifyCodeInput.focus(), 100);
                     
-                    showAlert('2FA verification required', 'warning');
+                    showAlert(t('verificationRequired'), 'warning');
                 } else {
                     showAlert(\`Login failed: \${result.error}\`, 'error');
                 }
